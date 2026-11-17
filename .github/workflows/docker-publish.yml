@@ -9,7 +9,7 @@ name: Build and publish Docker images
 # node agent binaries it serves to nodes (docker/Dockerfile.panel). Release
 # tags (v*) are built by release.yml.
 # Manual builds of other branches publish only their commit tag.
-on:
+on:  # fork-push-trigger-reset
   push:
     branches: [master]
   workflow_dispatch: {}

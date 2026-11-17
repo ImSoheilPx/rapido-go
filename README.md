@@ -57,7 +57,7 @@ The panel binary runs in one of two roles: `api` (stateless, safe to run several
 On the fresh server, as root:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/rapidodev/rapido-go/master/rapido-go.sh) install --domain panel.example.com
+bash <(curl -fsSL https://raw.githubusercontent.com/ImSoheilPx/rapido-go/master/rapido-go.sh) install --domain panel.example.com
 ```
 
 Before it changes anything it checks the OS, CPU architecture, RAM, disk and ports 80/443, and looks up your domain's DNS. If a record does not point at this server it tells you the exact A record to add and lets you continue (Caddy keeps retrying its certificate until the record exists). Whatever you did not pass as an option is asked for - but only when a terminal is attached, so the same command also runs unattended.
@@ -79,7 +79,7 @@ Each option also has an environment variable (`RAPIDO_DOMAIN`, `RAPIDO_EXTRA_DOM
 ```bash
 export RAPIDO_REPO_TOKEN=<token>
 bash <(curl -fsSL -H "Authorization: Bearer $RAPIDO_REPO_TOKEN" -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/rapidodev/rapido-go/contents/rapido-go.sh?ref=master") install --domain panel.example.com
+  "https://api.github.com/repos/ImSoheilPx/rapido-go/contents/rapido-go.sh?ref=master") install --domain panel.example.com
 ```
 
 The installer only asks for (or uses) a token when the repository or images are actually private; it never prints it, and stores it in `.env` (mode 600, for `rapido-go update`) only in that case.
@@ -139,7 +139,7 @@ rapido-go update
 
 It refreshes the installer files, pulls every image in parallel and stops there if nothing changed. Otherwise it backs up the database first (the last 5 backups are kept), recreates what changed - migrations run automatically - and checks the stack came back healthy. Installs made by older versions (a git checkout in `/opt/rapido-go`) update the same way.
 
-Deployments using the local `rapido-go-panel:private` alias download the published GHCR panel image and assign it to that alias after a successful pull. The previous image is retained as `rapido-go-panel:previous`. To select a verified commit image, pass `RAPIDO_PRIVATE_IMAGE_SOURCE=ghcr.io/rapidodev/rapido-go-panel:<full-commit-sha>` to the update command. Select the matching source branch with `RAPIDO_REPO_BRANCH` when the commit has not reached `master`. An explicitly requested local build also updates the deployment alias.
+Deployments using the local `rapido-go-panel:private` alias download the published GHCR panel image and assign it to that alias after a successful pull. The previous image is retained as `rapido-go-panel:previous`. To select a verified commit image, pass `RAPIDO_PRIVATE_IMAGE_SOURCE=ghcr.io/ImSoheilPx/rapido-go-panel:<full-commit-sha>` to the update command. Select the matching source branch with `RAPIDO_REPO_BRANCH` when the commit has not reached `master`. An explicitly requested local build also updates the deployment alias.
 
 A private edition is identified by its build-tag label or legacy private version label. Updates refuse to replace it with a public image. Building that edition locally requires its add-on sources and automatically enables the `private` Go build tag. Recovery preserves an existing private backup if the running image is public. Published images are started with disposable PostgreSQL and Redis on both supported architectures before they can be promoted to `latest`.
 
@@ -280,7 +280,7 @@ Go و PostgreSQL و Redis در بک‌اند، [sing-box](https://github.com/Sag
 روی سرور تازه، با کاربر root:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/rapidodev/rapido-go/master/rapido-go.sh) install --domain panel.example.com
+bash <(curl -fsSL https://raw.githubusercontent.com/ImSoheilPx/rapido-go/master/rapido-go.sh) install --domain panel.example.com
 ```
 
 پیش از هر تغییری، سیستم‌عامل، معماری CPU، RAM، دیسک و پورت‌های 80/443 را بررسی و DNS دامنه را چک می‌کند. اگر رکوردی به این سرور اشاره نکند، دقیقاً همان رکورد A را که باید اضافه کنید نشان می‌دهد و اجازه می‌دهد ادامه بدهید (Caddy تا وقتی رکورد برقرار شود گرفتن گواهی را تکرار می‌کند). هر چیزی که به‌صورت گزینه ندهید پرسیده می‌شود، ولی فقط وقتی ترمینال وصل باشد؛ پس همین دستور بدون نظارت هم اجرا می‌شود.
@@ -302,7 +302,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/rapidodev/rapido-go/master/r
 ```bash
 export RAPIDO_REPO_TOKEN=<token>
 bash <(curl -fsSL -H "Authorization: Bearer $RAPIDO_REPO_TOKEN" -H "Accept: application/vnd.github.raw" \
-  "https://api.github.com/repos/rapidodev/rapido-go/contents/rapido-go.sh?ref=master") install --domain panel.example.com
+  "https://api.github.com/repos/ImSoheilPx/rapido-go/contents/rapido-go.sh?ref=master") install --domain panel.example.com
 ```
 
 اسکریپت فقط وقتی مخزن یا ایمیج‌ها واقعاً خصوصی باشند توکن می‌خواهد یا به‌کار می‌برد؛ آن را چاپ نمی‌کند و فقط در همان حالت داخل `.env` (با دسترسی 600، برای `rapido-go update`) ذخیره می‌کند.

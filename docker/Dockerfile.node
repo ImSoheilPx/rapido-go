@@ -16,6 +16,11 @@ FROM golang:1.27-alpine AS gobuild
 WORKDIR /src
 COPY --from=sqlc /go/bin/sqlc /usr/local/bin/sqlc
 COPY go.mod go.sum ./
+# third_party/ before `go mod download`: go.mod's replace directives point
+# at local paths there (see Dockerfile.panel's same comment) - the module
+# download resolves every replace target, local ones included, so the
+# directories must exist in the build context at this step.
+COPY third_party/ third_party/
 RUN go mod download
 COPY sqlc.yaml ./
 COPY cmd/ cmd/

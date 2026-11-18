@@ -17,6 +17,7 @@ import (
 	forkednaive "github.com/legendary1205/rapido-go/internal/nodecore/naive"
 	forkedshadowsocks "github.com/legendary1205/rapido-go/internal/nodecore/shadowsocks"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
+	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	forkedsnell "github.com/legendary1205/rapido-go/internal/nodecore/snell"
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
 	forkedtrojan "github.com/legendary1205/rapido-go/internal/nodecore/trojan"
@@ -144,6 +145,10 @@ func (n *Node) UpdateUsers(tag, protocol string, users []User) error {
 	case "shadowtls":
 		return n.UpdateShadowTLSUsers(tag, convertUsers(n, users, func(u User) option.ShadowTLSUser {
 			return option.ShadowTLSUser{Name: u.Name, Password: u.Password}
+		}))
+	case "sshvpn":
+		return n.UpdateSSHVPNUsers(tag, convertUsers(n, users, func(u User) option.TrojanUser {
+			return option.TrojanUser{Name: u.Name, Password: u.Password}
 		}))
 	default:
 		return fmt.Errorf("nodecore: unsupported protocol %q", protocol)
@@ -291,6 +296,17 @@ func (n *Node) UpdateShadowTLSUsers(tag string, users []option.ShadowTLSUser) er
 	}
 	in.UpdateUsers(users)
 	return nil
+}
+
+// UpdateSSHVPNUsers is UpdateUsers for an SSHVPN inbound - same
+// option.TrojanUser credential shape (name+password) the trojan fork uses,
+// since an SSH password auth user carries exactly those two fields.
+func (n *Node) UpdateSSHVPNUsers(tag string, users []option.TrojanUser) error {
+	in, err := runningInbound[*forkedsshvpn.Inbound](n, tag, "SSHVPN")
+	if err != nil {
+		return err
+	}
+	return in.UpdateUsers(users)
 }
 
 // UpdateTUICUsers is UpdateUsers for a TUIC inbound. It fails, changing

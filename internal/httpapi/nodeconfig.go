@@ -333,6 +333,8 @@ func (h *Handler) loadNodeConfigSnapshot(ctx context.Context, version int64) (*n
 			spec.Password = settings.Naive.Password
 		case "shadowtls":
 			spec.Password = settings.ShadowTLS.Password
+		case "sshvpn":
+			spec.Password = settings.SSHVPN.Password
 		default:
 			continue
 		}

@@ -18,6 +18,10 @@ import (
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	vmessclient "github.com/sagernet/sing-vmess"
 	M "github.com/sagernet/sing/common/metadata"
+	"github.com/sagernet/sing/common/uot"
+	"golang.org/x/crypto/ssh"
+
+	sshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
 )
@@ -197,7 +201,126 @@ func protocolCases() []protocolCase {
 		trojan,
 		shadowsocksCase("chacha20-ietf-poly1305"),
 		shadowsocksCase("aes-256-gcm"),
+		sshvpnCase(),
 	}
+}
+
+// sshvpnCase exercises the SSH-server inbound with the same x/crypto/ssh
+// client library the server side is built on: password auth, one
+// direct-tcpip channel per TCP connection, and one UoT-framed channel to
+// the in-session relay address for UDP (see internal/nodecore/sshvpn's
+// own doc comment for the wire layout).
+func sshvpnCase() protocolCase {
+	return protocolCase{
+		name:     "sshvpn",
+		protocol: "sshvpn",
+		inbound: func(listen option.ListenOptions, us []testUser) option.Inbound {
+			users := make([]option.TrojanUser, len(us))
+			for i, u := range us {
+				users[i] = option.TrojanUser{Name: u.name, Password: u.secret}
+			}
+			return option.Inbound{Type: "sshvpn", Tag: forkTag, Options: &sshvpn.InboundOptions{
+				ListenOptions: listen,
+				Users:         users,
+			}}
+		},
+		dialTCP: func(nodeAddr string, u testUser, dest M.Socksaddr) (net.Conn, error) {
+			client, err := sshDial(nodeAddr, u)
+			if err != nil {
+				return nil, err
+			}
+			conn, err := client.Dial("tcp", dest.String())
+			if err != nil {
+				client.Close()
+				return nil, err
+			}
+			return &sshClientConn{Conn: conn, client: client}, nil
+		},
+		dialUDP: func(nodeAddr string, u testUser, dest M.Socksaddr) (net.PacketConn, error) {
+			client, err := sshDial(nodeAddr, u)
+			if err != nil {
+				return nil, err
+			}
+			// One direct-tcpip channel to the in-session relay address,
+			// then the sing UoT framing on top - exactly what the server
+			// side serves (serveUoTChannel).
+			channel, _, err := client.OpenChannel("direct-tcpip", ssh.Marshal(struct {
+				Host           string
+				Port           uint32
+				OriginatorIP   string
+				OriginatorPort uint32
+			}{Host: "127.0.0.2", Port: 1, OriginatorIP: "127.0.0.1", OriginatorPort: 0}))
+			if err != nil {
+				client.Close()
+				return nil, err
+			}
+			chanConn := &sshChannelPacketConn{channel: channel}
+			// UoT request then length-framed packets, per sing/common/uot.
+			if err := uot.WriteRequest(chanConn, uot.Request{Destination: dest, IsConnect: true}); err != nil {
+				channel.Close()
+				client.Close()
+				return nil, err
+			}
+			pc := uot.NewConn(chanConn, uot.Request{Destination: dest, IsConnect: true})
+			return &sshPacketConn{PacketConn: pc, client: client}, nil
+		},
+	}
+}
+
+// sshDial authenticates with username+password and accepts any host key
+// (the server generates a fresh one per inbound - its own doc comment).
+func sshDial(nodeAddr string, u testUser) (*ssh.Client, error) {
+	config := &ssh.ClientConfig{
+		User: u.name,
+		Auth: []ssh.AuthMethod{ssh.Password(u.secret)},
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return nil
+		},
+		Timeout: 2 * time.Second,
+	}
+	return ssh.Dial("tcp", nodeAddr, config)
+}
+
+// sshClientConn closes the whole SSH session when the proxied conn closes,
+// mirroring how a real client tears down.
+type sshClientConn struct {
+	net.Conn
+	client *ssh.Client
+}
+
+func (c *sshClientConn) Close() error {
+	c.Conn.Close()
+	return c.client.Close()
+}
+
+// sshChannelPacketConn adapts an ssh.Channel to the net.Conn shape the UoT
+// framing functions read from and write to.
+type sshChannelPacketConn struct {
+	channel ssh.Channel
+}
+
+func (c *sshChannelPacketConn) Read(b []byte) (int, error)  { return c.channel.Read(b) }
+func (c *sshChannelPacketConn) Write(b []byte) (int, error) { return c.channel.Write(b) }
+func (c *sshChannelPacketConn) Close() error                { return c.channel.Close() }
+func (c *sshChannelPacketConn) LocalAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
+}
+func (c *sshChannelPacketConn) RemoteAddr() net.Addr {
+	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 2), Port: 1}
+}
+func (c *sshChannelPacketConn) SetDeadline(time.Time) error       { return nil }
+func (c *sshChannelPacketConn) SetReadDeadline(time.Time) error   { return nil }
+func (c *sshChannelPacketConn) SetWriteDeadline(time.Time) error  { return nil }
+
+// sshPacketConn closes the SSH session behind the packet conn.
+type sshPacketConn struct {
+	net.PacketConn
+	client *ssh.Client
+}
+
+func (c *sshPacketConn) Close() error {
+	c.PacketConn.Close()
+	return c.client.Close()
 }
 
 func eachProtocol(t *testing.T, fn func(t *testing.T, pc protocolCase)) {

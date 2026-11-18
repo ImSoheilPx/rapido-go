@@ -40,6 +40,7 @@ import (
 	forkednaive "github.com/legendary1205/rapido-go/internal/nodecore/naive"
 	forkedshadowsocks "github.com/legendary1205/rapido-go/internal/nodecore/shadowsocks"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
+	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	forkedsnell "github.com/legendary1205/rapido-go/internal/nodecore/snell"
 	"github.com/legendary1205/rapido-go/internal/nodecore/spread"
 	forkedtrojan "github.com/legendary1205/rapido-go/internal/nodecore/trojan"
@@ -68,6 +69,7 @@ func InboundRegistry() *inbound.Registry {
 	forkedhysteria.RegisterInbound(registry)
 	forkednaive.RegisterInbound(registry)
 	forkedshadowtls.RegisterInbound(registry)
+	forkedsshvpn.RegisterInbound(registry)
 	return registry
 }
 

@@ -43,6 +43,7 @@ export const INBOUND_PROTOCOLS = [
   "naive",
   "snell",
   "shadowtls",
+  "sshvpn",
 ] as const;
 export const TLS_REQUIRED_PROTOCOLS = ["hysteria2", "tuic", "anytls", "hysteria"] as const;
 export const SNELL_V6_MODES = ["default", "unshaped", "unsafe-raw"] as const;

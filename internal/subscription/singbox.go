@@ -88,6 +88,9 @@ func SingBoxOutbound(tag, address string, in EffectiveInbound, settings proxyset
 	case proxysettings.Naive:
 		out["username"] = username
 		out["password"] = settings.Naive.Password
+	case proxysettings.SSHVPN:
+		out["user"] = username
+		out["password"] = settings.SSHVPN.Password
 	case proxysettings.ShadowTLS:
 		// ShadowTLS has no destination of its own to represent as a plain
 		// sing-box outbound (see internal/nodecore/shadowtls's own doc

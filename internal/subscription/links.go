@@ -42,6 +42,8 @@ func BuildLink(remark, address string, in EffectiveInbound, settings proxysettin
 		return hysteriaLink(remark, address, in, settings.Hysteria), nil
 	case proxysettings.Naive:
 		return naiveLink(remark, address, in, settings.Naive, username), nil
+	case proxysettings.SSHVPN:
+		return sshvpnLink(remark, address, in, settings.SSHVPN, username), nil
 	default:
 		return "", fmt.Errorf("subscription: unknown proxy type %q", settings.Type)
 	}
@@ -216,6 +218,17 @@ func hysteriaLink(remark, address string, in EffectiveInbound, s *proxysettings.
 		q.Set("obfs", in.HysteriaObfsPassword)
 	}
 	return fmt.Sprintf("hysteria://%s:%d?%s#%s", address, in.Port, q.Encode(), url.PathEscape(remark))
+}
+
+// sshvpnLink builds the ssh:// share link the SSH-proxy client family
+// (NekoBox/husi and v2rayN's SSH support) recognizes: user:pass@host:port.
+// No query parameters carry meaning across that family yet (its members
+// disagree on key-exchange and cipher knobs), so none are emitted - the
+// sing-box format subscription carries the full outbound where those
+// knobs exist.
+func sshvpnLink(remark, address string, in EffectiveInbound, s *proxysettings.SSHVPNSettings, username string) string {
+	userinfo := fmt.Sprintf("%s:%s", url.PathEscape(username), url.PathEscape(s.Password))
+	return fmt.Sprintf("ssh://%s@%s:%d#%s", userinfo, address, in.Port, url.PathEscape(remark))
 }
 
 // naiveLink builds the naive-proxy project's own documented share-link

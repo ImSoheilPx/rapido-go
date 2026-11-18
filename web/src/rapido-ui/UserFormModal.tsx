@@ -48,6 +48,7 @@ const PROTOCOL_ORDER: ProtocolType[] = [
   "hysteria",
   "naive",
   "shadowtls",
+  "sshvpn",
 ];
 
 const RESET_STRATEGIES: { value: DataLimitResetStrategy; labelKey: string }[] = [

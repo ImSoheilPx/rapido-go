@@ -30,11 +30,12 @@ const (
 	Hysteria    ProxyType = "hysteria"
 	Naive       ProxyType = "naive"
 	ShadowTLS   ProxyType = "shadowtls"
+	SSHVPN      ProxyType = "sshvpn"
 )
 
 func (t ProxyType) Valid() bool {
 	switch t {
-	case VMess, VLESS, Trojan, Shadowsocks, Hysteria2, TUIC, Snell, AnyTLS, Hysteria, Naive, ShadowTLS:
+	case VMess, VLESS, Trojan, Shadowsocks, Hysteria2, TUIC, Snell, AnyTLS, Hysteria, Naive, ShadowTLS, SSHVPN:
 		return true
 	}
 	return false
@@ -75,6 +76,7 @@ type Settings struct {
 	Hysteria    *HysteriaSettings
 	Naive       *NaiveSettings
 	ShadowTLS   *ShadowTLSSettings
+	SSHVPN      *SSHVPNSettings
 }
 
 type VMessSettings struct {
@@ -147,6 +149,14 @@ type NaiveSettings struct {
 // internal/nodecore/shadowtls's own doc comment on why this panel only
 // ever runs v3).
 type ShadowTLSSettings struct {
+	Password string `json:"password"`
+}
+
+// SSHVPNSettings is the SSH-password credential an sshvpn inbound checks
+// (see internal/nodecore/sshvpn's own doc comment): the account's own Name
+// is the SSH username, so only the password half is stored here - the same
+// shape NaiveSettings already uses.
+type SSHVPNSettings struct {
 	Password string `json:"password"`
 }
 
@@ -298,6 +308,8 @@ func (s Settings) Validate() error {
 		return checkSecret("naive", s.Naive.Password)
 	case ShadowTLS:
 		return checkSecret("shadowtls", s.ShadowTLS.Password)
+	case SSHVPN:
+		return checkSecret("sshvpn", s.SSHVPN.Password)
 	}
 	return fmt.Errorf("proxysettings: unknown proxy type %q", s.Type)
 }
@@ -334,6 +346,8 @@ func (s Settings) Credential() (field, value string) {
 		return "auth_str", s.Hysteria.AuthString
 	case ShadowTLS:
 		return "password", s.ShadowTLS.Password
+	case SSHVPN:
+		return "password", s.SSHVPN.Password
 	}
 	return "", ""
 }
@@ -490,6 +504,18 @@ func parse(proxyType ProxyType, raw json.RawMessage, coerceVisionFlow bool) (Set
 		}
 		return Settings{Type: ShadowTLS, ShadowTLS: &s}, nil
 
+	case SSHVPN:
+		var s SSHVPNSettings
+		if hasSettings(raw) {
+			if err := json.Unmarshal(raw, &s); err != nil {
+				return Settings{}, fmt.Errorf("proxysettings: invalid sshvpn settings: %w", err)
+			}
+		}
+		if s.Password == "" {
+			s.Password = randomPassword()
+		}
+		return Settings{Type: SSHVPN, SSHVPN: &s}, nil
+
 	default:
 		return Settings{}, fmt.Errorf("proxysettings: unknown proxy type %q", proxyType)
 	}
@@ -535,6 +561,8 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 		return json.Marshal(s.Naive)
 	case ShadowTLS:
 		return json.Marshal(s.ShadowTLS)
+	case SSHVPN:
+		return json.Marshal(s.SSHVPN)
 	default:
 		return nil, fmt.Errorf("proxysettings: unknown proxy type %q", s.Type)
 	}
@@ -568,5 +596,7 @@ func (s *Settings) Revoke() {
 		s.Naive.Password = randomPassword()
 	case ShadowTLS:
 		s.ShadowTLS.Password = randomPassword()
+	case SSHVPN:
+		s.SSHVPN.Password = randomPassword()
 	}
 }

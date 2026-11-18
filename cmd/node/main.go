@@ -40,6 +40,7 @@ import (
 	"github.com/legendary1205/rapido-go/internal/hostmetrics"
 	"github.com/legendary1205/rapido-go/internal/nodecore"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
+	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	"github.com/legendary1205/rapido-go/internal/nodecore/spread"
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
 	"github.com/legendary1205/rapido-go/internal/nodelog"
@@ -818,7 +819,7 @@ func (s *server) handleUpdateUsers(w http.ResponseWriter, r *http.Request) {
 // its user list replaced on the running listener.
 func hotUpdatableProtocol(protocol string) bool {
 	switch protocol {
-	case "vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls":
+	case "vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn":
 		return true
 	}
 	return false
@@ -1195,6 +1196,18 @@ func buildOptionsPlan(req startRequest) (sbox.Options, nodePlan, error) {
 					InnerPassword: in.ShadowTLSInnerPassword,
 
 					HandshakeServer: in.ShadowTLSHandshakeServer,
+				}})
+			case "sshvpn":
+				// An SSH server rather than a sing-box fork (see
+				// internal/nodecore/sshvpn's own doc comment) - its own
+				// options type, TrojanUser credentials (name+password:
+				// exactly what SSH password auth carries), TCP via RFC
+				// 4254 direct-tcpip channels and UDP via the sing UoT
+				// framing on a channel to the in-session relay address.
+				users := usersOnce(&built, in.Users, func(u userSpec) sbox.TrojanUser { return sbox.TrojanUser{Name: u.Name, Password: u.Password} })
+				inbounds = append(inbounds, sbox.Inbound{Type: "sshvpn", Tag: tag, Options: &forkedsshvpn.InboundOptions{
+					ListenOptions: listenOptions,
+					Users:         users,
 				}})
 			}
 		}

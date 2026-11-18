@@ -1536,5 +1536,7 @@
   "rapido.inbounds.quickAdd.transport": "Transport",
   "rapido.inbounds.quickAdd.transportTcp": "TCP",
   "rapido.inbounds.quickAdd.transportUdp": "UDP (UDPGW)",
-  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP proxies TCP channels; UDP opens a badvpn udpgw relay on the same port for NetMod / HTTP Injector."
+  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP proxies TCP channels; UDP opens a badvpn udpgw relay on the same port for NetMod / HTTP Injector.",
+  "rapido.coreForm.field.inboundTransport": "Transport",
+  "rapido.coreForm.hint.sshvpnTransport": "TCP proxies TCP channels; UDP also serves the badvpn udpgw dialect on 127.0.0.1:7300 (NetMod / HTTP Injector)."
 }

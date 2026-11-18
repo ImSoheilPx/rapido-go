@@ -241,7 +241,11 @@ export const dnsFields = (s: Item): FieldSpec[] => {
 };
 
 const TRANSPORT_PROTOCOLS = new Set(["vless", "vmess", "trojan", "shadowsocks"]);
-const FIXED_SECURITY = new Set<string>([...TLS_REQUIRED_PROTOCOLS, "snell", "shadowtls"]);
+const FIXED_SECURITY = new Set<string>([...TLS_REQUIRED_PROTOCOLS, "snell", "shadowtls", "sshvpn"]);
+// sshvpn's own transport selector: tcp (direct-tcpip channels only) or udp
+// (also serves the badvpn udpgw dialect on 127.0.0.1:7300 - NetMod / HTTP
+// Injector's UDP path). Shares the inbound `network` column, options only.
+const SSHVPN_TRANSPORTS = ["tcp", "udp"];
 
 /** `tagLocked`: an inbound the server already has keeps its tag, because hosts hang off it. */
 export const inboundFields = (i: Item, tagLocked: boolean): FieldSpec[] => {
@@ -255,6 +259,11 @@ export const inboundFields = (i: Item, tagLocked: boolean): FieldSpec[] => {
       { key: "network", kind: "select", label: "inboundNetwork", options: INBOUND_NETWORKS },
       { key: "header_type", kind: "text", placeholder: "http" }
     );
+  }
+  if (protocol === "sshvpn") {
+    // Transport, not a V2Ray network: sshvpn's network column is the
+    // tcp|udp transport selector (see the QuickAdd form's own picker).
+    fields.push({ key: "network", kind: "select", label: "inboundTransport", options: SSHVPN_TRANSPORTS, hint: "sshvpnTransport" });
   }
   if (!FIXED_SECURITY.has(protocol)) {
     fields.push({ key: "security", kind: "select", options: INBOUND_SECURITIES });
@@ -372,7 +381,9 @@ export const outboundDefaults = (o: Item): Item => {
 };
 
 export const inboundDefaults = (i: Item): Item => {
-  if (TRANSPORT_PROTOCOLS.has(str(i.protocol)) && i.network === undefined) return { ...i, network: "tcp" };
+  if ((TRANSPORT_PROTOCOLS.has(str(i.protocol)) || str(i.protocol) === "sshvpn") && i.network === undefined) {
+    return { ...i, network: "tcp" };
+  }
   if (i.protocol === "shadowtls" && i.shadowtls_inner_method === undefined) {
     return { ...i, shadowtls_inner_method: Object.keys(SHADOWTLS_INNER_KEY_BYTES)[0] };
   }

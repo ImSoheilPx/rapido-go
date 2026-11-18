@@ -45,10 +45,13 @@ const (
 )
 
 // udpgwRelayAddr is the in-session target of a udpgw channel:
-// 127.0.0.3:7300 - loopback, unreachable from outside the SSH session,
-// and a different address than uot's own relay so a client speaking
-// either dialect lands on the right handler.
-var udpgwRelayAddr = M.ParseSocksaddr("127.0.0.3:7300")
+// 127.0.0.1:7300 - the ecosystem's fixed address. NetMod, HTTP Injector,
+// HTTP Custom and tun2socks all open their udpgw channel THROUGH the SSH
+// proxy to 127.0.0.1:7300 (the loopback port badvpn-udpgw itself listens
+// on in every standard deployment), so the channel's destination arrives
+// as exactly this address. Loopback is unreachable from outside the SSH
+// session, and it cannot collide with uot's own 127.0.0.2:1 relay.
+var udpgwRelayAddr = M.ParseSocksaddr("127.0.0.1:7300")
 
 // udpgwServe runs the whole udpgw protocol on one authenticated
 // direct-tcpip channel, for the lifetime of that channel.

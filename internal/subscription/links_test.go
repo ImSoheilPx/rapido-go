@@ -77,6 +77,35 @@ func TestTrojanLinkPasswordEscaped(t *testing.T) {
 	}
 }
 
+func TestSSHVPNLinks(t *testing.T) {
+	// TCP flavour: plain ssh:// user:pass@host:port, no query.
+	tcpIn := EffectiveInbound{Network: "tcp", Port: 20310}
+	settings := proxysettings.Settings{Type: proxysettings.SSHVPN, SSHVPN: &proxysettings.SSHVPNSettings{Password: "pw"}}
+
+	link, err := BuildLink("r", "1.2.3.4", tcpIn, settings, "soli")
+	if err != nil {
+		t.Fatalf("tcp link: %v", err)
+	}
+	want := "ssh://soli:pw@1.2.3.4:20310#r"
+	if link != want {
+		t.Errorf("tcp link = %q, want %q", link, want)
+	}
+
+	// UDP flavour: the fixed udpgw loopback address the whole SSH-proxy
+	// ecosystem dials through the proxy - not the server's public address.
+	udpIn := EffectiveInbound{Network: "udp", Port: 20311}
+	link, err = BuildLink("r", "1.2.3.4", udpIn, settings, "soli")
+	if err != nil {
+		t.Fatalf("udp link: %v", err)
+	}
+	if !strings.Contains(link, "udpgw=127.0.0.1:7300") {
+		t.Errorf("udp link must carry the fixed loopback udpgw address: %s", link)
+	}
+	if !strings.HasPrefix(link, "ssh://soli:pw@1.2.3.4:20311/?") {
+		t.Errorf("udp link host/port wrong: %s", link)
+	}
+}
+
 func TestVMessLinkJSON(t *testing.T) {
 	in := EffectiveInbound{Network: "ws", HeaderType: "none", Port: 8080, Security: "none", Path: "/vm", HostHeader: "cdn.example.com"}
 	settings := proxysettings.Settings{Type: proxysettings.VMess, VMess: &proxysettings.VMessSettings{ID: "vmess-uuid"}}

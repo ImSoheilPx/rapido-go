@@ -1540,5 +1540,11 @@
   "rapido.coreForm.link.error.method": "Метод shadowsocks {{value}} не поддерживается.",
   "rapido.coreForm.link.error.plugin": "Плагины shadowsocks ({{value}}) не поддерживаются.",
   "rapido.coreForm.link.error.obfs": "Обфускация Hysteria2 ({{value}}) для исходящих не поддерживается.",
-  "rapido.coreForm.link.error.pin": "Закреплённый сертификат (pinSHA256) для исходящих не поддерживается."
+  "rapido.coreForm.link.error.pin": "Закреплённый сертификат (pinSHA256) для исходящих не поддерживается.",
+  "rapido.coreForm.field.inboundTransport": "Транспорт",
+  "rapido.coreForm.hint.sshvpnTransport": "TCP проксирует только TCP-каналы; UDP также обслуживает диалект badvpn udpgw на 127.0.0.1:7300 (NetMod / HTTP Injector).",
+  "rapido.inbounds.quickAdd.transport": "Транспорт",
+  "rapido.inbounds.quickAdd.transportTcp": "TCP",
+  "rapido.inbounds.quickAdd.transportUdp": "UDP (UDPGW)",
+  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP проксирует только TCP-каналы; UDP открывает ретранслятор udpgw на том же порту для NetMod / HTTP Injector."
 }

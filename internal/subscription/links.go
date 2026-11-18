@@ -229,11 +229,13 @@ func hysteriaLink(remark, address string, in EffectiveInbound, s *proxysettings.
 func sshvpnLink(remark, address string, in EffectiveInbound, s *proxysettings.SSHVPNSettings, username string) string {
 	userinfo := fmt.Sprintf("%s:%s", url.PathEscape(username), url.PathEscape(s.Password))
 	if in.Network == "udp" {
-		// The UDP flavour: NetMod/HTTP Injector connect the SSH proxy as
-		// usual and then open their udpgw channel to the same host:port -
-		// the standard badvpn udpgw deployment shape (sshd + udpgw on one
-		// box), which every udpgw-capable client expects.
-		return fmt.Sprintf("ssh://%s@%s:%d/?udpgw=%s:%d#%s", userinfo, address, in.Port, address, in.Port, url.PathEscape(remark))
+		// The UDP flavour: the client proxies to the SSH server as usual
+		// and opens its udpgw channel THROUGH that proxy to the fixed
+		// loopback address every badvpn-udpgw deployment listens on -
+		// 127.0.0.1:7300, NetMod/HTTP Injector/tun2socks' own default.
+		// This node serves the udpgw dialect on that exact in-session
+		// address, so the link names it as-is.
+		return fmt.Sprintf("ssh://%s@%s:%d/?udpgw=127.0.0.1:7300#%s", userinfo, address, in.Port, url.PathEscape(remark))
 	}
 	return fmt.Sprintf("ssh://%s@%s:%d#%s", userinfo, address, in.Port, url.PathEscape(remark))
 }

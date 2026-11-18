@@ -288,7 +288,7 @@ func TestSSHVPNUDPGWRoundTrip(t *testing.T) {
 		Port           uint32
 		OriginatorIP   string
 		OriginatorPort uint32
-	}{Host: "127.0.0.3", Port: 7300, OriginatorIP: "127.0.0.1", OriginatorPort: 0}))
+	}{Host: "127.0.0.1", Port: 7300, OriginatorIP: "127.0.0.1", OriginatorPort: 0}))
 	if err != nil {
 		t.Fatalf("open udpgw channel: %v", err)
 	}

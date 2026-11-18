@@ -1541,5 +1541,7 @@
   "rapido.inbounds.quickAdd.transport": "ترنسپورت",
   "rapido.inbounds.quickAdd.transportTcp": "TCP",
   "rapido.inbounds.quickAdd.transportUdp": "UDP (UDPGW)",
-  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP فقط کانال‌های TCP را می‌رساند؛ UDP یک رله‌ی udpgw روی همین پورت باز می‌کند برای NetMod و HTTP Injector."
+  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP فقط کانال‌های TCP را می‌رساند؛ UDP یک رله‌ی udpgw روی همین پورت باز می‌کند برای NetMod و HTTP Injector.",
+  "rapido.coreForm.field.inboundTransport": "ترنسپورت",
+  "rapido.coreForm.hint.sshvpnTransport": "TCP فقط کانال‌های TCP را می‌رساند؛ UDP هم دیالکت udpgw (بدvpn) را روی 127.0.0.1:7300 سرو می‌کند برای NetMod و HTTP Injector."
 }

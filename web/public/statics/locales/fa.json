@@ -1537,5 +1537,9 @@
   "rapido.coreForm.link.error.method": "روش رمزنگاری shadowsocks با نام {{value}} پشتیبانی نمی‌شود.",
   "rapido.coreForm.link.error.plugin": "پلاگین‌های shadowsocks ({{value}}) پشتیبانی نمی‌شوند.",
   "rapido.coreForm.link.error.obfs": "مبهم‌سازی Hysteria2 ({{value}}) برای خروجی‌ها پشتیبانی نمی‌شود.",
-  "rapido.coreForm.link.error.pin": "پین کردن گواهی (pinSHA256) برای خروجی‌ها پشتیبانی نمی‌شود."
+  "rapido.coreForm.link.error.pin": "پین کردن گواهی (pinSHA256) برای خروجی‌ها پشتیبانی نمی‌شود.",
+  "rapido.inbounds.quickAdd.transport": "ترنسپورت",
+  "rapido.inbounds.quickAdd.transportTcp": "TCP",
+  "rapido.inbounds.quickAdd.transportUdp": "UDP (UDPGW)",
+  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP فقط کانال‌های TCP را می‌رساند؛ UDP یک رله‌ی udpgw روی همین پورت باز می‌کند برای NetMod و HTTP Injector."
 }

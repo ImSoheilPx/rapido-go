@@ -442,6 +442,19 @@ func validateInboundEntries(entries []inboundSyncEntry) error {
 		if e.Protocol == "hysteria" && (e.UpMbps <= 0 || e.DownMbps <= 0) {
 			return &inboundValidationError{"inbound " + e.Tag + ": up_mbps and down_mbps must both be > 0 for protocol hysteria"}
 		}
+		if e.Protocol == "sshvpn" {
+			// network is the transport selector for this protocol: "tcp" (the
+			// default, direct-tcpip channels only) or "udp" (also serves the
+			// badvpn udpgw dialect on a channel to 127.0.0.3:7300 - see
+			// internal/nodecore/sshvpn's udpgw.go). SSH has no TLS layer of
+			// its own to terminate, so security stays "none" always.
+			if e.Network != "" && e.Network != "tcp" && e.Network != "udp" {
+				return &inboundValidationError{"inbound " + e.Tag + ": network must be \"tcp\" or \"udp\" for protocol sshvpn"}
+			}
+			if e.Security != "" && e.Security != "none" {
+				return &inboundValidationError{"inbound " + e.Tag + ": security must be \"none\" for protocol sshvpn (the SSH transport is the encryption)"}
+			}
+		}
 		if e.Protocol == "snell" {
 			// sing-snell's own v6 server rejects a PSK outside this range
 			// (see internal/nodecore/snell's own doc comment) - checked here

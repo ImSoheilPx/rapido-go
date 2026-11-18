@@ -228,6 +228,13 @@ func hysteriaLink(remark, address string, in EffectiveInbound, s *proxysettings.
 // knobs exist.
 func sshvpnLink(remark, address string, in EffectiveInbound, s *proxysettings.SSHVPNSettings, username string) string {
 	userinfo := fmt.Sprintf("%s:%s", url.PathEscape(username), url.PathEscape(s.Password))
+	if in.Network == "udp" {
+		// The UDP flavour: NetMod/HTTP Injector connect the SSH proxy as
+		// usual and then open their udpgw channel to the same host:port -
+		// the standard badvpn udpgw deployment shape (sshd + udpgw on one
+		// box), which every udpgw-capable client expects.
+		return fmt.Sprintf("ssh://%s@%s:%d/?udpgw=%s:%d#%s", userinfo, address, in.Port, address, in.Port, url.PathEscape(remark))
+	}
 	return fmt.Sprintf("ssh://%s@%s:%d#%s", userinfo, address, in.Port, url.PathEscape(remark))
 }
 

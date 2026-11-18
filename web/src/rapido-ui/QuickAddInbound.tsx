@@ -88,6 +88,7 @@ type FormValues = {
   downMbps: string;
   shadowtlsInnerMethod: string;
   shadowtlsInnerPassword: string;
+  sshTransport: "tcp" | "udp";
 };
 
 // The three shadowsocks-2022 AEAD methods this fork's embedded inner layer
@@ -112,6 +113,7 @@ export const QuickAddInboundModal: FC<{ onClose: () => void; onCreated: () => vo
     downMbps: "",
     shadowtlsInnerMethod: SHADOWTLS_INNER_METHODS[0],
     shadowtlsInnerPassword: "",
+    sshTransport: "tcp",
   });
   const [error, setError] = useState("");
   const createInbound = useCreateInboundMutation();
@@ -134,6 +136,7 @@ export const QuickAddInboundModal: FC<{ onClose: () => void; onCreated: () => vo
   const downMbps = Number(values.downMbps);
   const isHysteria = values.protocol === "hysteria";
   const isShadowtls = values.protocol === "shadowtls";
+  const isSshvpn = values.protocol === "sshvpn";
   const canSubmit =
     !!values.tag.trim() &&
     Number.isInteger(port) &&
@@ -148,6 +151,7 @@ export const QuickAddInboundModal: FC<{ onClose: () => void; onCreated: () => vo
       protocol: values.protocol,
       port,
       security: values.security,
+      ...(isSshvpn ? { network: values.sshTransport } : {}),
       ...(isHysteria ? { up_mbps: upMbps, down_mbps: downMbps } : {}),
       ...(isShadowtls ? { shadowtls_inner_method: values.shadowtlsInnerMethod } : {}),
       // Left out entirely (not sent as an empty string) when the admin
@@ -198,28 +202,46 @@ export const QuickAddInboundModal: FC<{ onClose: () => void; onCreated: () => vo
             onChange={(e) => setValues((v) => ({ ...v, port: e.target.value }))}
           />
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-xs text-rapido-muted">{t("rapido.inbounds.quickAdd.security")}</span>
-          <Select
-            className="w-full disabled:cursor-not-allowed disabled:opacity-60"
-            dir="ltr"
-            disabled={meta.securityLocked}
-            value={values.security}
-            onChange={(e) => setValues((v) => ({ ...v, security: e.target.value as "none" | "tls" }))}
-          >
-            <option value="none">{t("rapido.inbounds.quickAdd.securityNone")}</option>
-            <option value="tls">{t("rapido.inbounds.quickAdd.securityTls")}</option>
-          </Select>
-          <span className="text-xs text-rapido-muted">
-            {values.security === "tls"
-              ? t("rapido.inbounds.quickAdd.tlsAutoHint")
-              : values.protocol === "snell"
-              ? t("rapido.inbounds.quickAdd.snellAutoHint")
-              : isShadowtls
-              ? t("rapido.inbounds.quickAdd.shadowtlsAutoHint")
-              : null}
-          </span>
-        </label>
+        {!isSshvpn && (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-rapido-muted">{t("rapido.inbounds.quickAdd.security")}</span>
+            <Select
+              className="w-full disabled:cursor-not-allowed disabled:opacity-60"
+              dir="ltr"
+              disabled={meta.securityLocked}
+              value={values.security}
+              onChange={(e) => setValues((v) => ({ ...v, security: e.target.value as "none" | "tls" }))}
+            >
+              <option value="none">{t("rapido.inbounds.quickAdd.securityNone")}</option>
+              <option value="tls">{t("rapido.inbounds.quickAdd.securityTls")}</option>
+            </Select>
+            <span className="text-xs text-rapido-muted">
+              {values.security === "tls"
+                ? t("rapido.inbounds.quickAdd.tlsAutoHint")
+                : values.protocol === "snell"
+                ? t("rapido.inbounds.quickAdd.snellAutoHint")
+                : isShadowtls
+                ? t("rapido.inbounds.quickAdd.shadowtlsAutoHint")
+                : null}
+            </span>
+          </label>
+        )}
+
+        {isSshvpn && (
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-rapido-muted">{t("rapido.inbounds.quickAdd.transport")}</span>
+            <Select
+              className="w-full"
+              dir="ltr"
+              value={values.sshTransport}
+              onChange={(e) => setValues((v) => ({ ...v, sshTransport: e.target.value as "tcp" | "udp" }))}
+            >
+              <option value="tcp">{t("rapido.inbounds.quickAdd.transportTcp")}</option>
+              <option value="udp">{t("rapido.inbounds.quickAdd.transportUdp")}</option>
+            </Select>
+            <span className="text-xs text-rapido-muted">{t("rapido.inbounds.quickAdd.sshvpnTransportHint")}</span>
+          </label>
+        )}
 
         {isShadowtls && (
           <div className="flex flex-col gap-3">

@@ -314,6 +314,11 @@ func (h *Inbound) serveChannel(ctx context.Context, channel ssh.Channel, origina
 		h.serveUoTChannel(ctx, chanConn, metadata, user, fingerprint)
 		return
 	}
+	if metadata.Destination.Addr == udpgwRelayAddr.Addr && metadata.Destination.Port == udpgwRelayAddr.Port {
+		h.logger.InfoContext(ctx, "[", user, "] inbound udpgw packet connection")
+		h.udpgwServe(ctx, chanConn, metadata, user, fingerprint)
+		return
+	}
 	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
 	onClose := func(err error) { channel.Close() }
 	onClose = h.conns.TrackAuthenticated(h.Tag(), user, fingerprint, chanConn, onClose)

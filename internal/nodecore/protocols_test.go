@@ -3,6 +3,7 @@ package nodecore
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"net"
@@ -267,6 +268,96 @@ func sshvpnCase() protocolCase {
 	}
 }
 
+// TestSSHVPNUDPGWRoundTrip: a real badvpn-udpgw client (the dialect
+// NetMod / HTTP Injector speak) opens one direct-tcpip channel to the
+// udpgw relay address inside an authenticated SSH session and echoes a
+// UDP datagram through it, plus a keepalive frame that must be ignored.
+func TestSSHVPNUDPGWRoundTrip(t *testing.T) {
+	alice := testUser{"alice", "secret-1"}
+	pc := sshvpnCase()
+	f := startForkedNode(t, pc, alice)
+
+	client, err := sshDial(f.addr, alice)
+	if err != nil {
+		t.Fatalf("ssh dial: %v", err)
+	}
+	defer client.Close()
+
+	channel, _, err := client.OpenChannel("direct-tcpip", ssh.Marshal(struct {
+		Host           string
+		Port           uint32
+		OriginatorIP   string
+		OriginatorPort uint32
+	}{Host: "127.0.0.3", Port: 7300, OriginatorIP: "127.0.0.1", OriginatorPort: 0}))
+	if err != nil {
+		t.Fatalf("open udpgw channel: %v", err)
+	}
+	defer channel.Close()
+
+	writeUdpgw := func(flags byte, conid uint16, ip net.IP, port uint16, payload []byte) error {
+		frame := []byte{flags, byte(conid), byte(conid >> 8)}
+		if flags&0x08 != 0 { // IPv6 flag bit
+			var ip16 [16]byte
+			copy(ip16[:], ip.To16())
+			frame = append(frame, ip16[:]...)
+			frame = binary.BigEndian.AppendUint16(frame, port)
+		} else {
+			ip4 := ip.To4()
+			frame = append(frame, ip4...)
+			frame = binary.BigEndian.AppendUint16(frame, port)
+		}
+		frame = append(frame, payload...)
+		_, err := channel.Write(frame)
+		return err
+	}
+
+	// keepalive: flags 0x01, no address, no payload - the server must
+	// read it and keep going. Header only, exactly 3 bytes.
+	if _, err := channel.Write([]byte{0x01, 0x00, 0x00}); err != nil {
+		t.Fatalf("write keepalive: %v", err)
+	}
+
+	udpDest := f.udpDest
+	if err := writeUdpgw(0x00, 7, udpDest.IP, uint16(udpDest.Port), []byte("udp-over-udpgw")); err != nil {
+		t.Fatalf("write datagram: %v", err)
+	}
+
+	// Read frames until our echoed datagram shows up on conid 7.
+	buf := make([]byte, 4096)
+	for {
+		n, err := channel.Read(buf)
+		if err != nil {
+			t.Fatalf("read udpgw frame: %v", err)
+		}
+		frame := buf[:n]
+		if len(frame) < 3 {
+			continue
+		}
+		flags := frame[0]
+		conid := binary.LittleEndian.Uint16(frame[1:3])
+		if conid != 7 || flags&0x01 != 0 {
+			continue // not our datagram
+		}
+		body := frame[3:]
+		var payload []byte
+		if flags&0x08 != 0 {
+			if len(body) < 18 {
+				t.Fatalf("short ipv6 frame")
+			}
+			payload = body[18:]
+		} else {
+			if len(body) < 6 {
+				t.Fatalf("short ipv4 frame")
+			}
+			payload = body[6:]
+		}
+		if string(payload) != "udp-over-udpgw" {
+			t.Fatalf("echo mismatch: %q", payload)
+		}
+		break
+	}
+}
+
 // sshDial authenticates with username+password and accepts any host key
 // (the server generates a fresh one per inbound - its own doc comment).
 func sshDial(nodeAddr string, u testUser) (*ssh.Client, error) {
@@ -308,9 +399,9 @@ func (c *sshChannelPacketConn) LocalAddr() net.Addr {
 func (c *sshChannelPacketConn) RemoteAddr() net.Addr {
 	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 2), Port: 1}
 }
-func (c *sshChannelPacketConn) SetDeadline(time.Time) error       { return nil }
-func (c *sshChannelPacketConn) SetReadDeadline(time.Time) error   { return nil }
-func (c *sshChannelPacketConn) SetWriteDeadline(time.Time) error  { return nil }
+func (c *sshChannelPacketConn) SetDeadline(time.Time) error      { return nil }
+func (c *sshChannelPacketConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *sshChannelPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
 // sshPacketConn closes the SSH session behind the packet conn.
 type sshPacketConn struct {

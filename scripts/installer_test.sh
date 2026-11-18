@@ -359,23 +359,23 @@ unit "pull_images leaves the panel image to the local build" \
      WORK_LOG="$(mktemp)"; RAPIDO_BUILD_LOCALLY=1 pull_images >/dev/null 2>&1; sed "s/pull -q //" "$WORK_LOG"'
 
 unit "the private alias pulls a selected registry image and preserves its predecessor" \
-    'pull -q ghcr.io/ImSoheilPx/rapido-go-panel:release-test
+    'pull -q ghcr.io/imsoheilpx/rapido-go-panel:release-test
 image inspect rapido-go-panel:private
 tag rapido-go-panel:private rapido-go-panel:previous
-tag ghcr.io/ImSoheilPx/rapido-go-panel:release-test rapido-go-panel:private' \
+tag ghcr.io/imsoheilpx/rapido-go-panel:release-test rapido-go-panel:private' \
     'WORK_LOG="$(mktemp)"; docker() { echo "$*" >> "$WORK_LOG"; return 0; }
-     RAPIDO_PRIVATE_IMAGE_SOURCE=ghcr.io/ImSoheilPx/rapido-go-panel:release-test pull_image rapido-go-panel:private >/dev/null
+     RAPIDO_PRIVATE_IMAGE_SOURCE=ghcr.io/imsoheilpx/rapido-go-panel:release-test pull_image rapido-go-panel:private >/dev/null
      grep -v "^image inspect --format " "$WORK_LOG"'
 unit "the private alias defaults to the published panel image" \
-    'pull -q ghcr.io/ImSoheilPx/rapido-go-panel:latest' \
+    'pull -q ghcr.io/imsoheilpx/rapido-go-panel:latest' \
     'WORK_LOG="$(mktemp)"; docker() { echo "$*" >> "$WORK_LOG"; return 0; }
      APP_DIR="$(mktemp -d)"; unset RAPIDO_PRIVATE_IMAGE_SOURCE
      pull_image rapido-go-panel:private >/dev/null
      head -n 1 "$WORK_LOG"'
 unit "a failed private image download leaves the local alias untouched" \
-    'pull -q ghcr.io/ImSoheilPx/rapido-go-panel:release-test' \
+    'pull -q ghcr.io/imsoheilpx/rapido-go-panel:release-test' \
     'WORK_LOG="$(mktemp)"; docker() { echo "$*" >> "$WORK_LOG"; return 1; }
-     if RAPIDO_PRIVATE_IMAGE_SOURCE=ghcr.io/ImSoheilPx/rapido-go-panel:release-test pull_image rapido-go-panel:private >/dev/null; then exit 1; fi
+     if RAPIDO_PRIVATE_IMAGE_SOURCE=ghcr.io/imsoheilpx/rapido-go-panel:release-test pull_image rapido-go-panel:private >/dev/null; then exit 1; fi
      cat "$WORK_LOG"'
 unit_fails "the private alias cannot be its own registry source" \
     'RAPIDO_PRIVATE_IMAGE_SOURCE=rapido-go-panel:private pull_image rapido-go-panel:private'
@@ -383,7 +383,7 @@ unit "a failed image backup prevents replacing the private alias" \
     'image inspect rapido-go-panel:private
 tag rapido-go-panel:private rapido-go-panel:previous' \
     'WORK_LOG="$(mktemp)"; docker() { echo "$*" >> "$WORK_LOG"; [ "$1" != tag ]; }
-     if tag_private_panel_image ghcr.io/ImSoheilPx/rapido-go-panel:release-test; then exit 1; fi
+     if tag_private_panel_image ghcr.io/imsoheilpx/rapido-go-panel:release-test; then exit 1; fi
      grep -v "^image inspect --format " "$WORK_LOG"'
 
 unit "legacy private edition metadata is recognized" 'private' \
@@ -392,7 +392,7 @@ unit "legacy private edition metadata is recognized" 'private' \
 unit "a public candidate cannot overwrite a private installation" 'kept' \
     'image_has_private_features() { [ "$1" = rapido-go-panel:private ]; }
      docker() { case "$1" in tag) echo UNEXPECTED_TAG ;; esac; return 0; }
-     if tag_private_panel_image ghcr.io/ImSoheilPx/rapido-go-panel:public >/dev/null 2>&1; then exit 1; fi
+     if tag_private_panel_image ghcr.io/imsoheilpx/rapido-go-panel:public >/dev/null 2>&1; then exit 1; fi
      echo kept'
 unit "recovery keeps the original private backup when the active image is public" \
     'tag rapido-go-panel:private rapido-go-panel:previous-public
@@ -419,7 +419,7 @@ unit_fails "a private add-on without its service dependency fails before Docker 
      docker() { echo UNEXPECTED_BUILD; return 0; }; build_local_image'
 unit "a local build also updates the private deployment alias" \
     'tag rapido-go-panel:private rapido-go-panel:previous
-tag ghcr.io/ImSoheilPx/rapido-go-panel:latest rapido-go-panel:private' \
+tag ghcr.io/imsoheilpx/rapido-go-panel:latest rapido-go-panel:private' \
     'APP_DIR="$(mktemp -d)"; mkdir -p "$APP_DIR/docker"; : > "$APP_DIR/docker/Dockerfile.panel"
      WORK_LOG="$(mktemp)"; docker() { echo "$*" >> "$WORK_LOG"; return 0; }
      source_version() { echo test; }; image_list() { echo rapido-go-panel:private; }

@@ -115,7 +115,7 @@ DATA_DIR="${RAPIDO_GO_DATA_DIR:-/var/lib/rapido-go}"
 COMPOSE_PROJECT="${RAPIDO_GO_COMPOSE_PROJECT:-rapido-go}"
 BIN_PATH="/usr/local/bin/rapido-go"
 
-PANEL_IMAGE="ghcr.io/${REPO_OWNER}/rapido-go-panel"
+PANEL_IMAGE="ghcr.io/${REPO_OWNER,,}/rapido-go-panel"
 
 # The files a lightweight (non-git) install keeps in $APP_DIR.
 LITE_FILES="docker-compose.prod.yml rapido-go.sh Caddyfile.example .env.prod.example"

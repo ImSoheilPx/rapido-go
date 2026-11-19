@@ -158,6 +158,19 @@ func splitUsableUsers(protocol string, users []userSpec) ([]userSpec, []string) 
 	return kept, problems
 }
 
+// validateMtprotoSecret enforces the one shape a FakeTLS key can take: 32
+// hex chars decoding to 16 bytes (mtglib.SecretKeyLength) - the panel's
+// proxysettings mints exactly this, and the inbound's UpdateUsers refuses
+// anything else at apply time; catching it here keeps a bad row from
+// costing a node the whole list.
+func validateMtprotoSecret(secret string) error {
+	raw, err := hex.DecodeString(secret)
+	if err != nil || len(raw) != 16 {
+		return fmt.Errorf("invalid mtproto secret (want 32 hex chars)")
+	}
+	return nil
+}
+
 func userProblem(protocol string, i int, u userSpec, names, secrets map[string]bool) string {
 	name := u.Name
 	if name == "" {
@@ -174,6 +187,8 @@ func userProblem(protocol string, i int, u userSpec, names, secrets map[string]b
 		secret = u.UserKey
 	case "naive":
 		secret = u.Name
+	case "mtproto":
+		secret = u.MtprotoSecret
 	}
 	if secret == "" {
 		return fmt.Sprintf("missing credential for account %d in %s: %s", i, protocol, name)
@@ -182,6 +197,10 @@ func userProblem(protocol string, i int, u userSpec, names, secrets map[string]b
 	case "vmess", "vless", "tuic":
 		if _, err := uuid.Parse(secret); err != nil {
 			return fmt.Sprintf("invalid id in %s: %s", protocol, name)
+		}
+	case "mtproto":
+		if err := validateMtprotoSecret(secret); err != nil {
+			return fmt.Sprintf("%v: %s", err, name)
 		}
 	}
 	if secrets[secret] {

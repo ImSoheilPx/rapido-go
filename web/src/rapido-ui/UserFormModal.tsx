@@ -49,6 +49,7 @@ const PROTOCOL_ORDER: ProtocolType[] = [
   "naive",
   "shadowtls",
   "sshvpn",
+  "mtproto",
 ];
 
 const RESET_STRATEGIES: { value: DataLimitResetStrategy; labelKey: string }[] = [

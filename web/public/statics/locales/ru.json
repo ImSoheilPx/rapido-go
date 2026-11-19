@@ -1503,6 +1503,7 @@
   "rapido.coreForm.hint.tlsCertificate": "Без сертификата и ключа этот inbound не отправляется на ноды.",
   "rapido.coreForm.hint.snellPsk": "От 12 до 255 байт.",
   "rapido.coreForm.hint.shadowtlsKey": "В base64, длины, нужной выбранному методу.",
+  "rapido.coreForm.hint.mtprotoTlsDomain": "SNI FakeTLS, имитируемый всем слушателем. Пусто — www.google.com.",
   "rapido.coreForm.link.label": "Ссылка",
   "rapido.coreForm.link.fill": "Заполнить по ссылке",
   "rapido.coreForm.link.filled": "Заполнено по ссылке. Проверьте и сохраните.",

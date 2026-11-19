@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -164,6 +166,14 @@ type inboundDetailDTO struct {
 	// internal/nodecore/shadowtls's own doc comment.
 	ShadowTLSInnerMethod   string `json:"shadowtls_inner_method,omitempty"`
 	ShadowTLSInnerPassword string `json:"shadowtls_inner_password,omitempty"`
+
+	// MtprotoTlsDomain only applies to protocol="mtproto" - the FakeTLS
+	// SNI the whole listener emulates (vpn-ui parity: default
+	// www.google.com, applied in handleCreateInbound and at node build).
+	// Every user's secret composes with this one host at link time, and
+	// every ClientHello must carry it. See internal/nodecore/mtproto's
+	// own doc comment.
+	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
 }
 
 func toInboundDetailDTO(in generated.Inbound) inboundDetailDTO {
@@ -189,6 +199,7 @@ func toInboundDetailDTO(in generated.Inbound) inboundDetailDTO {
 		HysteriaObfsPassword:   in.HysteriaObfsPassword.String,
 		ShadowTLSInnerMethod:   in.ShadowtlsInnerMethod.String,
 		ShadowTLSInnerPassword: in.ShadowtlsInnerPassword.String,
+		MtprotoTlsDomain:       in.MtprotoTlsDomain.String,
 	}
 }
 
@@ -308,6 +319,9 @@ type inboundSyncEntry struct {
 	// See inboundDetailDTO's own doc comment on these two fields.
 	ShadowTLSInnerMethod   string `json:"shadowtls_inner_method,omitempty"`
 	ShadowTLSInnerPassword string `json:"shadowtls_inner_password,omitempty"`
+
+	// See inboundDetailDTO's own doc comment on this field.
+	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
 }
 
 // syncInboundEntries is the real work behind POST /api/inbounds/sync:
@@ -361,6 +375,7 @@ func (h *Handler) syncInboundEntries(ctx context.Context, entries []inboundSyncE
 			HysteriaObfsPassword:   textFromPtr(normalizeZeroString(&e.HysteriaObfsPassword)),
 			ShadowtlsInnerMethod:   textFromPtr(normalizeZeroString(&e.ShadowTLSInnerMethod)),
 			ShadowtlsInnerPassword: textFromPtr(normalizeZeroString(&e.ShadowTLSInnerPassword)),
+			MtprotoTlsDomain:       textFromPtr(normalizeZeroString(&e.MtprotoTlsDomain)),
 		})
 		if err != nil {
 			return created, fmt.Errorf("could not sync inbound %s: %w", e.Tag, err)
@@ -479,8 +494,50 @@ func validateInboundEntries(entries []inboundSyncEntry) error {
 				return &inboundValidationError{fmt.Sprintf("inbound %s: shadowtls_inner_password must be a base64-encoded key of at least %d bytes for method %s", e.Tag, keyLen, e.ShadowTLSInnerMethod)}
 			}
 		}
+		if e.Protocol == "mtproto" {
+			// FakeTLS IS the camouflage - a security column would be
+			// meaningless (the listener emulates a TLS server to
+			// www.google.com or whatever mtproto_tls_domain names; it
+			// never terminates real TLS), and MTProto-over-Telegram is
+			// TCP-only. See internal/nodecore/mtproto's own doc
+			// comment.
+			if e.Security != "" && e.Security != "none" {
+				return &inboundValidationError{"inbound " + e.Tag + ": security must be \"none\" for protocol mtproto"}
+			}
+			if e.Network != "" && e.Network != "tcp" {
+				return &inboundValidationError{"inbound " + e.Tag + ": network must be \"tcp\" for protocol mtproto"}
+			}
+			if e.MtprotoTlsDomain != "" {
+				if problem := mtprotoTlsDomainProblem(e.MtprotoTlsDomain); problem != "" {
+					return &inboundValidationError{"inbound " + e.Tag + ": " + problem}
+				}
+			}
+		}
 	}
 	return nil
+}
+
+// mtprotoTlsDomainProblem says why a mtproto_tls_domain value cannot be
+// served, or "" - it must be a bare hostname: not an IP (a literal address
+// in an SNI list is not something a Telegram client sends), no scheme, no
+// path, lowercase, DNS-length-bounded.
+func mtprotoTlsDomainProblem(domain string) string {
+	if domain != strings.ToLower(domain) {
+		return "mtproto_tls_domain must be lowercase"
+	}
+	if len(domain) > 253 {
+		return "mtproto_tls_domain must be at most 253 characters"
+	}
+	if strings.ContainsAny(domain, "/:#?@") {
+		return "mtproto_tls_domain must be a bare hostname (no scheme or path)"
+	}
+	if _, err := netip.ParseAddr(domain); err == nil {
+		return "mtproto_tls_domain must be a hostname, not an IP address"
+	}
+	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") || strings.Contains(domain, "..") {
+		return "mtproto_tls_domain must be a bare hostname"
+	}
+	return ""
 }
 
 // handleSyncInbounds implements POST /api/inbounds/sync (sudo only) - an
@@ -603,6 +660,13 @@ func (h *Handler) handleCreateInbound(c *gin.Context) {
 			e.ShadowTLSInnerPassword = key
 		}
 	}
+	if e.Protocol == "mtproto" && e.MtprotoTlsDomain == "" {
+		// Same one-click spirit: the FakeTLS SNI has a universal
+		// sensible default (vpn-ui's own), so an admin adding an
+		// mtproto inbound through the form gets a working camouflage
+		// domain without knowing what the field means.
+		e.MtprotoTlsDomain = "www.google.com"
+	}
 
 	if _, err := h.syncInboundEntries(ctx, []inboundSyncEntry{e}); err != nil {
 		var verr *inboundValidationError
@@ -675,7 +739,7 @@ func realityPortToPg(port int32) pgtype.Int4 {
 
 func proxyTypeValid(protocol string) bool {
 	switch protocol {
-	case "vmess", "vless", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn":
+	case "vmess", "vless", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn", "mtproto":
 		return true
 	}
 	return false

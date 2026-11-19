@@ -241,7 +241,7 @@ export const dnsFields = (s: Item): FieldSpec[] => {
 };
 
 const TRANSPORT_PROTOCOLS = new Set(["vless", "vmess", "trojan", "shadowsocks"]);
-const FIXED_SECURITY = new Set<string>([...TLS_REQUIRED_PROTOCOLS, "snell", "shadowtls"]);
+const FIXED_SECURITY = new Set<string>([...TLS_REQUIRED_PROTOCOLS, "snell", "shadowtls", "mtproto"]);
 
 /** `tagLocked`: an inbound the server already has keeps its tag, because hosts hang off it. */
 export const inboundFields = (i: Item, tagLocked: boolean): FieldSpec[] => {
@@ -308,6 +308,9 @@ export const inboundFields = (i: Item, tagLocked: boolean): FieldSpec[] => {
         { key: "shadowtls_inner_password", kind: "secret", required: true, generate: "ss2022Key", hint: "shadowtlsKey" }
       );
       break;
+    case "mtproto":
+      fields.push({ key: "mtproto_tls_domain", kind: "text", placeholder: "www.google.com", hint: "mtprotoTlsDomain" });
+      break;
   }
   return fields;
 };
@@ -330,7 +333,7 @@ const INBOUND_KEYS = [
   "network", "header_type", "security", "reality_private_key", "reality_short_ids", "reality_server_name",
   "reality_server_port", "tls_certificate", "tls_key", "tls_server_name", "hysteria2_obfs_password", "up_mbps", "down_mbps",
   "congestion_control", "zero_rtt_handshake", "snell_psk", "snell_v6_mode", "hysteria_obfs_password",
-  "shadowtls_inner_method", "shadowtls_inner_password",
+  "shadowtls_inner_method", "shadowtls_inner_password", "mtproto_tls_domain",
 ];
 
 const pruned = (item: Item, known: readonly string[], fields: readonly FieldSpec[]): Item => {

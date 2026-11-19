@@ -35,6 +35,11 @@ type nodeConfigUserSpec struct {
 	// userSpec (this struct's node-side mirror) for why it isn't folded
 	// into Password.
 	UserKey string `json:"user_key,omitempty"`
+	// MtprotoSecret is the mtproto user's 16-byte FakeTLS key, 32 hex
+	// chars - the whole per-user credential for that protocol (the
+	// inbound-level SNI it composes with is MtprotoTlsDomain on
+	// nodeConfigInboundSpec).
+	MtprotoSecret string `json:"mtproto_secret,omitempty"`
 }
 
 type nodeConfigRealitySpec struct {
@@ -141,6 +146,10 @@ type nodeConfigInboundSpec struct {
 	// the primary host's SNI. See plainHostName for when there isn't one.
 	ShadowTLSHandshakeServer string `json:"shadowtls_handshake_server,omitempty"`
 
+	// MtprotoTlsDomain only applies to protocol="mtproto" - see
+	// inbounds.go's inboundDetailDTO for what it means.
+	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
+
 	// usersKey is which nodeConfigSnapshot.usersJSON entry holds this
 	// inbound's already-encoded Users - the protocol, or its no-flow variant
 	// (see flowApplies). Not part of the wire format.
@@ -183,6 +192,7 @@ type nodeConfigInboundWire struct {
 	ShadowTLSInnerPassword string `json:"shadowtls_inner_password,omitempty"`
 
 	ShadowTLSHandshakeServer string `json:"shadowtls_handshake_server,omitempty"`
+	MtprotoTlsDomain         string `json:"mtproto_tls_domain,omitempty"`
 }
 
 // plainHostName keeps what can be dialled as it stands: a host's SNI can also be
@@ -335,6 +345,8 @@ func (h *Handler) loadNodeConfigSnapshot(ctx context.Context, version int64) (*n
 			spec.Password = settings.ShadowTLS.Password
 		case "sshvpn":
 			spec.Password = settings.SSHVPN.Password
+		case "mtproto":
+			spec.MtprotoSecret = settings.MTProto.Secret
 		default:
 			continue
 		}
@@ -433,6 +445,11 @@ func (h *Handler) loadNodeConfigSnapshot(ctx context.Context, version int64) (*n
 			spec.ShadowTLSInnerMethod = in.ShadowtlsInnerMethod.String
 			spec.ShadowTLSInnerPassword = in.ShadowtlsInnerPassword.String
 			spec.ShadowTLSHandshakeServer = plainHostName(in.Sni.String)
+		case "mtproto":
+			spec.MtprotoTlsDomain = in.MtprotoTlsDomain.String
+			if spec.MtprotoTlsDomain == "" {
+				spec.MtprotoTlsDomain = "www.google.com"
+			}
 		}
 		if spec.Users == nil {
 			spec.Users = []nodeConfigUserSpec{}
@@ -480,6 +497,11 @@ type nodeConfigSchema struct {
 	// streamOutbounds: the outbound TLS and transport fields
 	// outboundUsesStreamFields names (5+).
 	streamOutbounds bool
+	// newProtocols: inbound types added after schema 5 (mtproto, and
+	// the wireguard/amnezia slices to follow) - an agent that did not
+	// announce 6+ must never be handed one (see renderSchema's
+	// unservable gate, the exact precedent of outboundsFor).
+	newProtocols bool
 }
 
 func parseNodeConfigSchema(raw string) nodeConfigSchema {
@@ -487,7 +509,7 @@ func parseNodeConfigSchema(raw string) nodeConfigSchema {
 	if err != nil {
 		return nodeConfigSchema{}
 	}
-	return nodeConfigSchema{compact: n >= 2, delta: n >= 3, extendedRules: n >= 4, streamOutbounds: n >= 5}
+	return nodeConfigSchema{compact: n >= 2, delta: n >= 3, extendedRules: n >= 4, streamOutbounds: n >= 5, newProtocols: n >= 6}
 }
 
 // cacheKey files a rendered payload by everything that shapes its bytes.
@@ -502,7 +524,23 @@ func (s nodeConfigSchema) cacheKey(p nodeProfile) string {
 	if s.streamOutbounds {
 		key += "/ob2"
 	}
+	if s.newProtocols {
+		key += "/np"
+	}
 	return key
+}
+
+// schemaRefusesProtocol reports whether an inbound protocol postdates schema
+// 5 - only an agent that pulled with schema=6+ (cmd/node's pullOnce sends
+// ?schema=5 today; the node binary this panel ships alongside will send 6)
+// knows how to build it. See renderSchema's own gate for what happens to
+// one in an older agent's config.
+func schemaRefusesProtocol(protocol string) bool {
+	switch protocol {
+	case "mtproto":
+		return true
+	}
+	return false
 }
 
 // outboundsFor turns what an agent can't build into a block outbound of the same
@@ -586,6 +624,15 @@ func (s *nodeConfigSnapshot) renderSchema(p nodeProfile, schema nodeConfigSchema
 			sets[ref] = users
 			users = nil
 		}
+		if !schema.newProtocols && schemaRefusesProtocol(in.Protocol) {
+			// An agent that did not announce schema 6 cannot build
+			// this inbound type; handing it over would make it fail
+			// its whole config. Kept in the list (rules and profiles
+			// that name the tag stay valid) with the payload fields
+			// cleared and no users, the same fail-closed shape
+			// outboundsFor gives an outbound an old agent can't dial.
+			in.Protocol = "unknown-" + in.Protocol
+		}
 		wire = append(wire, nodeConfigInboundWire{
 			Tag: in.Tag, Protocol: in.Protocol, ListenPort: in.ListenPort, ListenPorts: in.ListenPorts,
 			Users: users, UsersRef: ref, TLS: in.TLS, Transport: in.Transport,
@@ -595,6 +642,7 @@ func (s *nodeConfigSnapshot) renderSchema(p nodeProfile, schema nodeConfigSchema
 			HysteriaObfsPassword: in.HysteriaObfsPassword,
 			ShadowTLSInnerMethod: in.ShadowTLSInnerMethod, ShadowTLSInnerPassword: in.ShadowTLSInnerPassword,
 			ShadowTLSHandshakeServer: in.ShadowTLSHandshakeServer,
+			MtprotoTlsDomain:         in.MtprotoTlsDomain,
 		})
 	}
 

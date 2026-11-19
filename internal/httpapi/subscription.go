@@ -435,6 +435,7 @@ func (h *Handler) forEachUserHost(ctx context.Context, user generated.User, fn f
 			SnellPSK: ph.host.SnellPSK, SnellV6Mode: ph.host.SnellV6Mode,
 			HysteriaObfsPassword: ph.host.HysteriaObfsPassword,
 			ShadowTLSInnerMethod: ph.host.ShadowTLSInnerMethod, ShadowTLSInnerPassword: ph.host.ShadowTLSInnerPassword,
+			MtprotoTlsDomain: ph.host.MtprotoTlsDomain,
 		}
 		fn(ph.host.Protocol, settings, remark, address, eff)
 	}

@@ -1500,6 +1500,7 @@
   "rapido.coreForm.hint.tlsCertificate": "بدون گواهی و کلید، این ورودی به نودها فرستاده نمی‌شود.",
   "rapido.coreForm.hint.snellPsk": "بین 12 تا 255 بایت.",
   "rapido.coreForm.hint.shadowtlsKey": "به‌صورت base64 و به طولی که روش انتخابی لازم دارد.",
+  "rapido.coreForm.hint.mtprotoTlsDomain": "SNI جعلی TLS که کل شنونده از آن تقلید می‌کند. خالی یعنی www.google.com.",
   "rapido.coreForm.link.label": "لینک",
   "rapido.coreForm.link.fill": "پر کردن از روی لینک",
   "rapido.coreForm.link.filled": "از روی لینک پر شد. بررسی کنید و بعد ذخیره کنید.",

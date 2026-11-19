@@ -1492,6 +1492,7 @@
   "rapido.coreForm.hint.tlsCertificate": "没有证书和密钥时,此入站不会发送到节点。",
   "rapido.coreForm.hint.snellPsk": "12 到 255 字节。",
   "rapido.coreForm.hint.shadowtlsKey": "base64 格式,长度取决于所选方法。",
+  "rapido.coreForm.hint.mtprotoTlsDomain": "整个监听器模拟的 FakeTLS SNI。留空即 www.google.com。",
   "rapido.coreForm.link.label": "链接",
   "rapido.coreForm.link.fill": "从链接填充",
   "rapido.coreForm.link.filled": "已从链接填充。请检查后保存。",

@@ -19,6 +19,7 @@ SELECT i.tag, i.protocol, i.network, i.header_type, i.security,
        i.hysteria2_obfs_password, i.up_mbps, i.down_mbps, i.congestion_control, i.zero_rtt_handshake,
        i.snell_psk, i.snell_v6_mode, i.hysteria_obfs_password,
        i.shadowtls_inner_method, i.shadowtls_inner_password,
+       i.mtproto_tls_domain,
        h.port, h.sni, h.host, h.path,
        ARRAY(
            SELECT DISTINCT hp.port FROM hosts hp

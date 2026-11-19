@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -31,11 +32,12 @@ const (
 	Naive       ProxyType = "naive"
 	ShadowTLS   ProxyType = "shadowtls"
 	SSHVPN      ProxyType = "sshvpn"
+	MTProto     ProxyType = "mtproto"
 )
 
 func (t ProxyType) Valid() bool {
 	switch t {
-	case VMess, VLESS, Trojan, Shadowsocks, Hysteria2, TUIC, Snell, AnyTLS, Hysteria, Naive, ShadowTLS, SSHVPN:
+	case VMess, VLESS, Trojan, Shadowsocks, Hysteria2, TUIC, Snell, AnyTLS, Hysteria, Naive, ShadowTLS, SSHVPN, MTProto:
 		return true
 	}
 	return false
@@ -77,6 +79,7 @@ type Settings struct {
 	Naive       *NaiveSettings
 	ShadowTLS   *ShadowTLSSettings
 	SSHVPN      *SSHVPNSettings
+	MTProto     *MTProtoSettings
 }
 
 type VMessSettings struct {
@@ -159,6 +162,44 @@ type ShadowTLSSettings struct {
 type SSHVPNSettings struct {
 	Password string `json:"password"`
 }
+
+// MTProtoSettings is the mtproto user's whole credential: a 16-byte
+// FakeTLS key stored as 32 lowercase hex chars (vpn-ui parity - the
+// "ee"/domain composition into the shareable secret happens at link time,
+// see subscription.mtprotoLink; the inbound-level SNI it composes with is
+// the inbound's own mtproto_tls_domain, not stored here). Hex rather than
+// the base64 randomPassword() shape because every Telegram-side tooling
+// speaks hex secrets.
+type MTProtoSettings struct {
+	Secret string `json:"secret"`
+}
+
+// randomHexSecret mints n random bytes as 2n lowercase hex chars.
+func randomHexSecret(n int) string {
+	buf := make([]byte, n)
+	if _, err := rand.Read(buf); err != nil {
+		panic(err) // crypto/rand failing means the OS entropy source is broken
+	}
+	return hex.EncodeToString(buf)
+}
+
+// checkMtprotoSecret validates the 32-lowercase-hex shape every consumer
+// of a mtproto secret assumes (hex.DecodeString into 16 bytes).
+func checkMtprotoSecret(secret string) error {
+	if len(secret) != mtprotoSecretHexLen {
+		return fmt.Errorf("invalid mtproto secret: must be %d hex characters", mtprotoSecretHexLen)
+	}
+	raw, err := hex.DecodeString(secret)
+	if err != nil || len(raw) != mtgSecretKeyLength {
+		return fmt.Errorf("invalid mtproto secret: must be %d hex characters", mtprotoSecretHexLen)
+	}
+	return nil
+}
+
+const (
+	mtprotoSecretHexLen = 32 // 16 bytes
+	mtgSecretKeyLength  = 16 // mtglib.SecretKeyLength
+)
 
 // randomPassword mirrors app/utils/system.py's random_password:
 // secrets.token_urlsafe(16) - 16 random bytes, unpadded base64url.
@@ -310,6 +351,8 @@ func (s Settings) Validate() error {
 		return checkSecret("shadowtls", s.ShadowTLS.Password)
 	case SSHVPN:
 		return checkSecret("sshvpn", s.SSHVPN.Password)
+	case MTProto:
+		return checkMtprotoSecret(s.MTProto.Secret)
 	}
 	return fmt.Errorf("proxysettings: unknown proxy type %q", s.Type)
 }
@@ -348,6 +391,8 @@ func (s Settings) Credential() (field, value string) {
 		return "password", s.ShadowTLS.Password
 	case SSHVPN:
 		return "password", s.SSHVPN.Password
+	case MTProto:
+		return "secret", s.MTProto.Secret
 	}
 	return "", ""
 }
@@ -516,6 +561,18 @@ func parse(proxyType ProxyType, raw json.RawMessage, coerceVisionFlow bool) (Set
 		}
 		return Settings{Type: SSHVPN, SSHVPN: &s}, nil
 
+	case MTProto:
+		var s MTProtoSettings
+		if hasSettings(raw) {
+			if err := json.Unmarshal(raw, &s); err != nil {
+				return Settings{}, fmt.Errorf("proxysettings: invalid mtproto settings: %w", err)
+			}
+		}
+		if s.Secret == "" {
+			s.Secret = randomHexSecret(mtgSecretKeyLength)
+		}
+		return Settings{Type: MTProto, MTProto: &s}, nil
+
 	default:
 		return Settings{}, fmt.Errorf("proxysettings: unknown proxy type %q", proxyType)
 	}
@@ -563,6 +620,8 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 		return json.Marshal(s.ShadowTLS)
 	case SSHVPN:
 		return json.Marshal(s.SSHVPN)
+	case MTProto:
+		return json.Marshal(s.MTProto)
 	default:
 		return nil, fmt.Errorf("proxysettings: unknown proxy type %q", s.Type)
 	}
@@ -598,5 +657,7 @@ func (s *Settings) Revoke() {
 		s.ShadowTLS.Password = randomPassword()
 	case SSHVPN:
 		s.SSHVPN.Password = randomPassword()
+	case MTProto:
+		s.MTProto.Secret = randomHexSecret(mtgSecretKeyLength)
 	}
 }

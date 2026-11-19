@@ -3,6 +3,7 @@ module github.com/legendary1205/rapido-go
 go 1.27.3
 
 require (
+	github.com/9seconds/mtg/v2 v2.3.0
 	github.com/anytls/sing-anytls v0.0.11
 	github.com/gin-gonic/gin v1.12.0
 	github.com/go-chi/chi/v5 v5.2.5
@@ -31,6 +32,7 @@ require (
 )
 
 require (
+	github.com/OneOfOne/xxhash v1.2.8 // indirect
 	github.com/ajg/form v1.5.1 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect
@@ -78,6 +80,7 @@ require (
 	github.com/libp2p/go-nat v1.0.1-0.20250821073202-01afc089f138 // indirect
 	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/logrusorgru/aurora v2.0.3+incompatible // indirect
+	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mdlayher/netlink v1.11.2 // indirect
 	github.com/mdlayher/socket v0.6.0 // indirect
@@ -86,9 +89,12 @@ require (
 	github.com/miekg/dns v1.1.72 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
-	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
+	github.com/panjf2000/ants/v2 v2.12.0 // indirect
+	github.com/pelletier/go-toml/v2 v2.3.0 // indirect
+	github.com/pires/go-proxyproto v0.11.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.1 // indirect
+	github.com/rs/zerolog v1.35.0 // indirect
 	github.com/sagernet/bbolt v0.0.0-20260823094646-e24805439c9c // indirect
 	github.com/sagernet/fswatch v0.1.2 // indirect
 	github.com/sagernet/gvisor v0.0.0-20260727.0-sing-box-mod.1 // indirect
@@ -99,8 +105,10 @@ require (
 	github.com/sagernet/smux v1.5.50-sing-box-mod.1 // indirect
 	github.com/sagernet/ws v0.0.0-20231204124109-acfe8907c854 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/tylertreat/BoomFilters v0.0.0-20251117164519-53813c36cc1b // indirect
 	github.com/ugorji/go/codec v1.3.1 // indirect
 	github.com/vishvananda/netns v0.0.5 // indirect
+	github.com/yl2chen/cidranger v1.0.2 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
@@ -133,3 +141,9 @@ replace github.com/sagernet/sing-quic => ./third_party/sing-quic
 replace github.com/sagernet/sing-vmess => ./third_party/sing-vmess
 
 replace github.com/sagernet/sing-shadowsocks => ./third_party/sing-shadowsocks
+
+// Vendored+patched to expose the internal FakeTLS secret-match as a
+// multi-secret dispatch (mtglib/dispatch.go) so one listener can serve
+// several per-user secrets - see third_party/mtg/PATCHES.md. Everything
+// else is upstream v2.3.0 verbatim.
+replace github.com/9seconds/mtg/v2 => ./third_party/mtg

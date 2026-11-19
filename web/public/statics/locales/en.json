@@ -1495,6 +1495,7 @@
   "rapido.coreForm.hint.tlsCertificate": "Without both a certificate and a key, this inbound isn't sent to the nodes.",
   "rapido.coreForm.hint.snellPsk": "12 to 255 bytes.",
   "rapido.coreForm.hint.shadowtlsKey": "Base64, of the length the chosen method needs.",
+  "rapido.coreForm.hint.mtprotoTlsDomain": "FakeTLS SNI emulated for the whole listener. Leave empty for www.google.com.",
   "rapido.coreForm.link.label": "Link",
   "rapido.coreForm.link.fill": "Fill in from the link",
   "rapido.coreForm.link.filled": "Filled in from the link. Check it, then save.",

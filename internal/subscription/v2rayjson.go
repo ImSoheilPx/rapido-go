@@ -45,6 +45,12 @@ func V2rayJSONConfig(remark, address string, in EffectiveInbound, settings proxy
 	case "kcp", "splithttp", "xhttp":
 		return nil, nil
 	}
+	// MTProto has no V2Ray outbound (Xray-core never grew one; the
+	// client is the Telegram app itself, fed by the tg:// share link
+	// from BuildLink) - nothing this format can say about the host.
+	if settings.Type == proxysettings.MTProto {
+		return nil, nil
+	}
 
 	var vlessFlowSet bool
 	outbound := map[string]any{"tag": "proxy", "protocol": string(settings.Type)}

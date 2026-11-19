@@ -82,6 +82,13 @@ type EffectiveInbound struct {
 	// ShadowTLS password.
 	ShadowTLSInnerMethod   string `json:"shadowtls_inner_method"`
 	ShadowTLSInnerPassword string `json:"shadowtls_inner_password"`
+
+	// MtprotoTlsDomain only applies when Protocol is "mtproto" - the
+	// FakeTLS SNI the listener emulates, composed into every user's
+	// tg:// link secret ("ee" + secret + hex(domain)); empty means the
+	// panel default www.google.com (mtprotoLink applies it). See
+	// internal/nodecore/mtproto's own doc comment.
+	MtprotoTlsDomain string `json:"mtproto_tls_domain"`
 }
 
 // dialsOwnCertificate reports whether a host reaches, by bare address, an inbound
@@ -152,6 +159,7 @@ func BuildEffectiveInbound(inbound generated.Inbound, host generated.Host) Effec
 		HysteriaObfsPassword:   inbound.HysteriaObfsPassword.String,
 		ShadowTLSInnerMethod:   inbound.ShadowtlsInnerMethod.String,
 		ShadowTLSInnerPassword: inbound.ShadowtlsInnerPassword.String,
+		MtprotoTlsDomain:      inbound.MtprotoTlsDomain.String,
 	}
 	if security == "reality" {
 		e.RealityPublicKey = derivePublicKey(inbound.RealityPrivateKey.String)

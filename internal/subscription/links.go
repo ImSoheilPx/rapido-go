@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -44,6 +45,8 @@ func BuildLink(remark, address string, in EffectiveInbound, settings proxysettin
 		return naiveLink(remark, address, in, settings.Naive, username), nil
 	case proxysettings.SSHVPN:
 		return sshvpnLink(remark, address, in, settings.SSHVPN, username), nil
+	case proxysettings.MTProto:
+		return mtprotoLink(remark, address, in, settings.MTProto), nil
 	default:
 		return "", fmt.Errorf("subscription: unknown proxy type %q", settings.Type)
 	}
@@ -231,6 +234,44 @@ func sshvpnLink(remark, address string, in EffectiveInbound, s *proxysettings.SS
 	return fmt.Sprintf("ssh://%s@%s:%d#%s", userinfo, address, in.Port, url.PathEscape(remark))
 }
 
+// mtprotoLink builds the tg:// link every Telegram client understands
+// (the protocol's ONLY consumption path - no generic proxy client speaks
+// MTProto): server, port and the composed FakeTLS secret
+// "ee" + <32-hex user secret> + <hex(domain)>. The domain default is
+// applied BEFORE encoding, matching the vpn-ui panel's byte parity
+// ((domain || "www.google.com")).
+func mtprotoLink(remark, address string, in EffectiveInbound, s *proxysettings.MTProtoSettings) string {
+	domain := in.MtprotoTlsDomain
+	if domain == "" {
+		domain = "www.google.com"
+	}
+	secret := "ee" + s.Secret + hex.EncodeToString([]byte(domain))
+	return fmt.Sprintf("tg://proxy?server=%s&port=%d&secret=%s#%s",
+		encodeURIComponentGo(address), in.Port, encodeURIComponentGo(secret), url.PathEscape(remark))
+}
+
+// encodeURIComponentGo is a byte-for-byte clone of JavaScript's
+// encodeURIComponent: every byte outside the keep-set
+// A-Za-z0-9-_.!~*'() is percent-encoded. url.QueryEscape is NOT a
+// substitute - it encodes space as "+" and escapes !, *, ' and ( ),
+// all of which a Telegram client would then read back wrong
+// (vpn-ui's JS link builder and its Go clone keep the same keep-set
+// for exactly this reason).
+func encodeURIComponentGo(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9',
+			c == '-' || c == '_' || c == '.' || c == '~' || c == '!' || c == '*' || c == '\'' || c == '(' || c == ')':
+			b.WriteByte(c)
+		default:
+			fmt.Fprintf(&b, "%%%02X", c)
+		}
+	}
+	return b.String()
+}
 // naiveLink builds the naive-proxy project's own documented share-link
 // format (naive+https://user:pass@host:port?padding=true) - unlike every
 // other link in this file, security here is genuinely optional (naive can

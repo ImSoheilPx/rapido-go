@@ -18,6 +18,7 @@ import (
 	forkedshadowsocks "github.com/legendary1205/rapido-go/internal/nodecore/shadowsocks"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
 	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
+	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
 	forkedsnell "github.com/legendary1205/rapido-go/internal/nodecore/snell"
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
 	forkedtrojan "github.com/legendary1205/rapido-go/internal/nodecore/trojan"
@@ -93,6 +94,10 @@ type User struct {
 	// internal/nodecore/snell's own doc comment); reusing Password would
 	// blur the two.
 	UserKey string // snell
+	// MtprotoSecret is the mtproto user's 16-byte FakeTLS key, 32 hex
+	// chars - like UserKey, a protocol whose per-user credential is not
+	// a password at all (it keys an HMAC, never compared as text).
+	MtprotoSecret string // mtproto
 }
 
 // UpdateUsers replaces the user list on an already-running inbound identified
@@ -149,6 +154,10 @@ func (n *Node) UpdateUsers(tag, protocol string, users []User) error {
 	case "sshvpn":
 		return n.UpdateSSHVPNUsers(tag, convertUsers(n, users, func(u User) option.TrojanUser {
 			return option.TrojanUser{Name: u.Name, Password: u.Password}
+		}))
+	case "mtproto":
+		return n.UpdateMtprotoUsers(tag, convertUsers(n, users, func(u User) forkedmtproto.MtprotoUser {
+			return forkedmtproto.MtprotoUser{Name: u.Name, Secret: u.MtprotoSecret}
 		}))
 	default:
 		return fmt.Errorf("nodecore: unsupported protocol %q", protocol)
@@ -303,6 +312,17 @@ func (n *Node) UpdateShadowTLSUsers(tag string, users []option.ShadowTLSUser) er
 // since an SSH password auth user carries exactly those two fields.
 func (n *Node) UpdateSSHVPNUsers(tag string, users []option.TrojanUser) error {
 	in, err := runningInbound[*forkedsshvpn.Inbound](n, tag, "SSHVPN")
+	if err != nil {
+		return err
+	}
+	return in.UpdateUsers(users)
+}
+
+// UpdateMtprotoUsers is UpdateUsers for an MTProto inbound - it fails,
+// changing nothing, if a user's secret is not 32 hex chars (16 bytes), the
+// one shape the FakeTLS dispatch can key an HMAC with.
+func (n *Node) UpdateMtprotoUsers(tag string, users []forkedmtproto.MtprotoUser) error {
+	in, err := runningInbound[*forkedmtproto.Inbound](n, tag, "MTProto")
 	if err != nil {
 		return err
 	}

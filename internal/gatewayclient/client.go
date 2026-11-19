@@ -245,6 +245,10 @@ type EffectiveHost struct {
 	ShadowTLSInnerMethod   string `json:"shadowtls_inner_method"`
 	ShadowTLSInnerPassword string `json:"shadowtls_inner_password"`
 
+	// Only meaningful for a peer host whose Protocol is "mtproto" - the
+	// FakeTLS SNI its own tg:// links compose the secret with.
+	MtprotoTlsDomain string `json:"mtproto_tls_domain"`
+
 	// Remark is the raw, unformatted template ({USERNAME} etc. still
 	// literal) - the RECEIVING panel formats it with its own user's own
 	// variables, never this peer's, since {DATA_USAGE}/{EXPIRE_DATE}/etc.

@@ -74,6 +74,13 @@ func ClashProxy(remark, address string, in EffectiveInbound, settings proxysetti
 	if !isMeta && (settings.Type == proxysettings.Hysteria2 || settings.Type == proxysettings.TUIC || settings.Type == proxysettings.Hysteria) {
 		return nil, nil
 	}
+	// MTProto is never returned either, meta or not: no Clash release
+	// speaks MTProto proxying (the client is the Telegram app itself,
+	// fed by the tg:// share link from BuildLink), so a clash entry for
+	// this host would be dead config rather than a working proxy.
+	if settings.Type == proxysettings.MTProto {
+		return nil, nil
+	}
 
 	node := map[string]any{
 		"name": remark, "server": address, "port": in.Port, "udp": true,

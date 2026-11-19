@@ -26,6 +26,15 @@ func SingBoxOutbound(tag, address string, in EffectiveInbound, settings proxyset
 		return nil, nil, nil
 	}
 
+	// MTProto has no sing-box outbound shape at all (sing-box speaks
+	// MTProto neither as inbound nor outbound; the client is the
+	// Telegram app itself) - the tg:// share link (BuildLink) is this
+	// protocol's one consumption path, so there is nothing to emit for
+	// the sing-box subscription format.
+	if settings.Type == proxysettings.MTProto {
+		return nil, nil, nil
+	}
+
 	out := map[string]any{
 		"type": string(settings.Type), "tag": tag, "server": address, "server_port": in.Port,
 	}

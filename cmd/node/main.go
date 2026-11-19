@@ -41,6 +41,7 @@ import (
 	"github.com/legendary1205/rapido-go/internal/nodecore"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
 	"github.com/legendary1205/rapido-go/internal/nodecore/spread"
+	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
 	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
 	"github.com/legendary1205/rapido-go/internal/nodelog"
@@ -508,6 +509,10 @@ type inboundSpec struct {
 	// ShadowTLSHandshakeServer is the site a client that fails ShadowTLS's
 	// authentication gets relayed to. Empty closes that client instead.
 	ShadowTLSHandshakeServer string `json:"shadowtls_handshake_server,omitempty"`
+	// MtprotoTlsDomain only applies to protocol="mtproto" - the FakeTLS
+	// SNI the whole listener emulates; empty means www.google.com (the
+	// panel's own default, nodeconfig.go's inbound-spec case).
+	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
 }
 
 func (in inboundSpec) ports() []uint16 {
@@ -533,6 +538,9 @@ type userSpec struct {
 	// UserKey is snell's own per-user secret - see internal/nodecore/snell's
 	// own doc comment for why it is not folded into Password.
 	UserKey string `json:"user_key,omitempty"` // snell
+	// MtprotoSecret is the mtproto user's 16-byte FakeTLS key, 32 hex
+	// chars - mirrors nodeConfigUserSpec's own field of the same name.
+	MtprotoSecret string `json:"mtproto_secret,omitempty"` // mtproto
 }
 
 type tlsSpec struct {
@@ -819,7 +827,7 @@ func (s *server) handleUpdateUsers(w http.ResponseWriter, r *http.Request) {
 // its user list replaced on the running listener.
 func hotUpdatableProtocol(protocol string) bool {
 	switch protocol {
-	case "vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn":
+	case "vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn", "mtproto":
 		return true
 	}
 	return false
@@ -828,7 +836,7 @@ func hotUpdatableProtocol(protocol string) bool {
 func nodeUsers(specs []userSpec) []nodecore.User {
 	users := make([]nodecore.User, len(specs))
 	for i, u := range specs {
-		users[i] = nodecore.User{Name: u.Name, UUID: u.UUID, Password: u.Password, Flow: u.Flow, UserKey: u.UserKey}
+		users[i] = nodecore.User{Name: u.Name, UUID: u.UUID, Password: u.Password, Flow: u.Flow, UserKey: u.UserKey, MtprotoSecret: u.MtprotoSecret}
 	}
 	return users
 }
@@ -1215,6 +1223,22 @@ func buildOptionsPlan(req startRequest) (sbox.Options, nodePlan, error) {
 					opts.Key = tlsOpts.Key[0]
 				}
 				inbounds = append(inbounds, sbox.Inbound{Type: "sshvpn", Tag: tag, Options: opts})
+			case "mtproto":
+				// A FakeTLS-camouflaged MTProto relay over the
+				// vendored mtg (see internal/nodecore/mtproto's
+				// own doc comment) - its own options type, one
+				// TCP listener, no TLS block of its own: the
+				// FakeTLS SNI is the inbound-level domain, not a
+				// real certificate. Multi-port needs no special
+				// case: each port's listener serves every secret.
+				users := usersOnce(&built, in.Users, func(u userSpec) forkedmtproto.MtprotoUser {
+					return forkedmtproto.MtprotoUser{Name: u.Name, Secret: u.MtprotoSecret}
+				})
+				inbounds = append(inbounds, sbox.Inbound{Type: "mtproto", Tag: tag, Options: &forkedmtproto.InboundOptions{
+					ListenOptions: listenOptions,
+					Users:         users,
+					TlsDomain:     in.MtprotoTlsDomain,
+				}})
 			}
 		}
 	}

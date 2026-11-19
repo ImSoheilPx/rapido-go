@@ -1532,11 +1532,5 @@
   "rapido.coreForm.link.error.method": "The shadowsocks method {{value}} isn't supported.",
   "rapido.coreForm.link.error.plugin": "Shadowsocks plugins ({{value}}) aren't supported.",
   "rapido.coreForm.link.error.obfs": "Hysteria2 obfuscation ({{value}}) isn't supported on outbounds.",
-  "rapido.coreForm.link.error.pin": "A pinned certificate (pinSHA256) isn't supported on outbounds.",
-  "rapido.inbounds.quickAdd.transport": "Transport",
-  "rapido.inbounds.quickAdd.transportTcp": "TCP",
-  "rapido.inbounds.quickAdd.transportUdp": "UDP (UDPGW)",
-  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP proxies TCP channels; UDP opens a badvpn udpgw relay on the same port for NetMod / HTTP Injector.",
-  "rapido.coreForm.field.inboundTransport": "Transport",
-  "rapido.coreForm.hint.sshvpnTransport": "TCP proxies TCP channels; UDP also serves the badvpn udpgw dialect on 127.0.0.1:7300 (NetMod / HTTP Injector)."
+  "rapido.coreForm.link.error.pin": "A pinned certificate (pinSHA256) isn't supported on outbounds."
 }

@@ -90,18 +90,23 @@ func TestForkedProtocolsPresence(t *testing.T) {
 			t.Errorf("a rejected client changed presence: %+v", snap)
 		}
 
-		// A UDP association is not a connection.
-		pconn, err := pc.dialUDP(f.addr, alice, M.SocksaddrFromNet(f.udpDest))
-		if err != nil {
-			t.Fatalf("dial udp: %v", err)
-		}
-		t.Cleanup(func() { pconn.Close() })
-		if err := udpEchoOnce(pconn, f.udpDest, []byte("presence-udp")); err != nil {
-			t.Fatalf("udp round trip: %v", err)
-		}
-		time.Sleep(100 * time.Millisecond)
-		if snap := f.mgr.Presence(); snap.Total != 3 || usersOf(snap)["alice"] != 2 {
-			t.Errorf("a UDP association was counted as a connection: %+v", snap)
+		// A UDP association is not a connection. (Protocols without a UDP
+		// path - sshvpn - skip this leg; their presence is TCP-only.)
+		if pc.dialUDP == nil {
+			t.Logf("%s: no UDP leg, skipping", pc.name)
+		} else {
+			pconn, err := pc.dialUDP(f.addr, alice, M.SocksaddrFromNet(f.udpDest))
+			if err != nil {
+				t.Fatalf("dial udp: %v", err)
+			}
+			t.Cleanup(func() { pconn.Close() })
+			if err := udpEchoOnce(pconn, f.udpDest, []byte("presence-udp")); err != nil {
+				t.Fatalf("udp round trip: %v", err)
+			}
+			time.Sleep(100 * time.Millisecond)
+			if snap := f.mgr.Presence(); snap.Total != 3 || usersOf(snap)["alice"] != 2 {
+				t.Errorf("a UDP association was counted as a connection: %+v", snap)
+			}
 		}
 
 		a1.Close()

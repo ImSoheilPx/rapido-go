@@ -1,43 +1,35 @@
-// Package sshvpn is an SSH-server inbound: an SSH transport
-// (golang.org/x/crypto/ssh, already a dependency for this panel's own node
-// management, internal/sshexec) whose authenticated channels carry proxy
-// traffic - TCP through RFC 4254 "direct-tcpip" channels, UDP through the
-// same session over a per-client local UDP listener the client's SOCKS
-// layer talks to (the model ssh -D dynamic forwarding established: a
-// "forwarded-tcpip" channel to the well-known UDP relay port below).
+// Package sshvpn is an SSH-server inbound whose TCP channels carry proxy
+// traffic through RFC 4254 direct-tcpip - rebuilt around one lesson every
+// comparable project converged on (slipgate's StunTLS, serve2d, the
+// ssh-plan writeups): a bare SSH listener puts the cleartext "SSH-2.0-"
+// banner on the wire, which is a first-class DPI fingerprint, and Iranian
+// operators in particular throttle recognized SSH flows. So this inbound
+// serves TWO shapes on one port and picks per connection by peeking the
+// first bytes, exactly like serve2d/sslh do:
 //
-// Unlike every other package under internal/nodecore this is NOT a fork of
-// a sing-box inbound - sing-box itself has no SSH server at all, only a
-// client outbound (protocol/ssh/outbound.go, which cannot even carry UDP:
-// its ListenPacket returns os.ErrInvalid). So this package owns its whole
-// protocol surface:
+//   - TLS ClientHello (0x16 0x03 ...) -> SSH-over-TLS: a real crypto/tls
+//     server, the SSH session runs inside it. The banner never appears in
+//     the clear; the flow is an ordinary TLS stream. SlipNet/HTTP
+//     Injector/NetMod's "SSH over TLS / StunTLS" modes land here.
 //
-//   - TCP: a client opens a direct-tcpip channel per connection; the
-//     channel is routed exactly like a trojan connection is.
+//   - cleartext "SSH-" banner -> plain SSH, for clients with no TLS mode
+//     (and for the panel's own E2E tests). A DPI that recognizes it gets
+//     exactly what it would get from any other SSH server - no worse.
 //
-//   - UDP: a client that wants UDP opens ONE direct-tcpip channel to
-//     udpRelayLocalAddr (127.0.0.2:1 - never routable from outside the
-//     SSH session itself). The channel then speaks the sing-box UoT
-//     wire format (github.com/sagernet/sing/common/uot: a short request
-//     header followed by length-framed packets), the same format
-//     sing-box clients already speak for every TCP-carried UDP relay -
-//     so a sing-box/NekoBox client with a "uot" toggle and an OpenSSH
-//     client through a UoT-aware SOCKS shim both land on one
-//     implementation, with no second protocol to maintain.
+// UDP is deliberately gone: the two UDP-over-SSH dialects this package
+// once carried (badvpn udpgw and sing UoT) were the least stable part of
+// the protocol on lossy Iranian paths - an SSH channel is a TCP stream,
+// and tunneling UDP semantics over a throttled TCP flow compounds the
+// loss. Clients that need UDP should use a QUIC-native protocol
+// (hysteria2/tuic, both served by this panel) rather than this one.
 //
-// Host keys: generated per inbound at Start, never persisted - a node
-// restart changes the server's host key, which is exactly what a real
-// SSH server behind a load balancer without a shared host key behaves
-// like. Clients that pin host keys will need the new fingerprint; the
-// subscription never carries one (matching the sing-box outbound's own
-// empty-host-key-list behaviour, which accepts any host key).
-//
-// Users: the standard three additions every fork in this package makes -
-// UpdateUsers on a running listener (an atomically swapped map checked
-// per authentication attempt; established channels are unaffected until
-// they end), per-user byte counting on every channel, and userkey.Key
-// identities so a mid-session user-list swap can never bill a channel to
-// the wrong user.
+// Everything else follows the standard fork pattern in this package:
+// UpdateUsers hot-swap (an atomically replaced map consulted at each
+// authentication attempt; established sessions untouched), per-user byte
+// counting on every channel, userkey.Key identities so a mid-session
+// user-list swap can never bill the wrong user, and an ephemeral
+// per-inbound RSA-3072 host key (plus a self-signed TLS certificate when
+// security=tls) that never touches disk.
 //
 // Re-sync golang.org/x/crypto/ssh on every dependency upgrade; the wire
 // surface used here (direct-tcpip, PasswordCallback, channel accept
@@ -45,11 +37,15 @@
 package sshvpn
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
+	"math/big"
 	"net"
 	"os"
 	"sync/atomic"
@@ -72,36 +68,32 @@ import (
 
 const TypeSSHVPN = "sshvpn"
 
-// udpRelayAddr is the in-session address a client's UDP-over-SSH channel
-// targets. 127.0.0.2:1 - a loopback address nothing outside the SSH session
-// can ever route to, so the only way to reach this branch is an
-// authenticated channel that explicitly named it. A direct-tcpip channel to
-// any other address is an ordinary TCP proxy request.
-var udpRelayAddr = M.ParseSocksaddr("127.0.0.2:1")
-
 func RegisterInbound(registry *inbound.Registry) {
 	inbound.Register[InboundOptions](registry, TypeSSHVPN, NewInbound)
 }
 
-// InboundOptions is this package's own options shape (see the package doc
-// comment for why there is no sing-box upstream type to mirror): the shared
-// ListenOptions every inbound takes, plus the per-user credential list.
+// InboundOptions is this package's own options shape (sing-box has no SSH
+// server type to mirror): the shared ListenOptions, the per-user
+// credential list, and the inbound's TLS material when security=tls.
 type InboundOptions struct {
 	option.ListenOptions
 	Users []option.TrojanUser
+	// Certificate/Key are PEM strings; empty means generate a self-signed
+	// pair at first start (clients of this protocol expect and accept a
+	// self-signed cert - they pin nothing).
+	Certificate string
+	Key         string
 }
 
-// credential is one user of one UpdateUsers generation. Passwords here are
-// the panel-issued random secrets (proxysettings.SSHSettings), verified with
-// a constant-time compare per authentication attempt.
+// credential is one user of one UpdateUsers generation. Passwords are the
+// panel-issued random secrets, verified with a constant-time compare.
 type credential struct {
 	key      *userkey.Key
 	password string
 }
 
-// userList is an immutable published generation: built once, never edited,
-// swapped atomically by UpdateUsers. authFn is what ssh.ServerConfig's
-// PasswordCallback closes over.
+// userList is an immutable published generation: built once, never
+// edited, swapped atomically by UpdateUsers.
 type userList struct {
 	byName map[string]credential
 }
@@ -118,6 +110,7 @@ type Inbound struct {
 	logger     logger.ContextLogger
 	listener   *listener.Listener
 	sshConfig  *ssh.ServerConfig
+	tlsConfig  *tls.Config
 	users      atomic.Pointer[userList]
 	hostKey    ssh.Signer
 	trafficMgr *traffic.Manager
@@ -147,17 +140,83 @@ func NewInbound(ctx context.Context, router adapter.Router, logger log.ContextLo
 	if err := inb.UpdateUsers(options.Users); err != nil {
 		return nil, err
 	}
+	if err := inb.initKeys(options); err != nil {
+		return nil, err
+	}
 	return inb, nil
+}
+
+// initKeys generates (once) the SSH host key and the TLS material: the
+// caller's PEM pair when given, else a self-signed certificate over the
+// host key. Both live for the inbound's lifetime; user-list changes
+// never rebuild them.
+func (h *Inbound) initKeys(options InboundOptions) error {
+	key, err := rsa.GenerateKey(rand.Reader, 3072)
+	if err != nil {
+		return E.Cause(err, "sshvpn: generate host key")
+	}
+	der := x509.MarshalPKCS1PrivateKey(key)
+	block := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: der}
+	signer, err := ssh.ParsePrivateKey(pem.EncodeToMemory(block))
+	if err != nil {
+		return E.Cause(err, "sshvpn: parse host key")
+	}
+	h.hostKey = signer
+
+	var tlsCert tls.Certificate
+	if options.Certificate != "" && options.Key != "" {
+		tlsCert, err = tls.X509KeyPair([]byte(options.Certificate), []byte(options.Key))
+		if err != nil {
+			return E.Cause(err, "sshvpn: parse TLS certificate/key")
+		}
+	} else {
+		tlsCert, err = selfSignedCert(key)
+		if err != nil {
+			return E.Cause(err, "sshvpn: generate TLS certificate")
+		}
+	}
+	h.tlsConfig = &tls.Config{
+		Certificates: []tls.Certificate{tlsCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+	return nil
+}
+
+// selfSignedCert mints a fresh leaf certificate over the host key. A
+// CN/SAN of "localhost" is deliberate: clients of this transport pin
+// nothing (SSH validates the SERVER's host key, not the TLS cert - the
+// TLS layer is camouflage against DPI), and a name that resolves nowhere
+// avoids telling a passive observer anything about this deployment.
+func selfSignedCert(key *rsa.PrivateKey) (tls.Certificate, error) {
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(825 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+	keyDER := x509.MarshalPKCS1PrivateKey(key)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: keyDER})
+	return tls.X509KeyPair(certPEM, keyPEM)
 }
 
 // UpdateUsers replaces the inbound's user list in place, on the
 // already-running listener. Authentication attempts resolve against the
 // latest generation; channels already established keep running untouched
 // (an SSH password is only presented at session setup, never re-checked).
-//
-// A zero-length list publishes an empty map - every authentication attempt
-// then fails, which is what "no users configured" must mean (the same
-// no-users stance every other fork here takes).
+// A zero-length list publishes an empty map - every attempt fails, which
+// is what "no users configured" must mean.
 func (h *Inbound) UpdateUsers(users []option.TrojanUser) error {
 	for i, u := range users {
 		if u.Password == "" {
@@ -174,33 +233,17 @@ func (h *Inbound) UpdateUsers(users []option.TrojanUser) error {
 	return nil
 }
 
-// Start generates the host key (first start only - a restart keeps it for
-// the inbound's lifetime so established clients' known_hosts stay valid
-// across user-list changes, which never rebuild the listener) and starts
-// the TCP listener.
+// Start builds the SSH server config and starts the TCP listener.
 func (h *Inbound) Start(stage adapter.StartStage) error {
 	if stage != adapter.StartStateStart {
 		return nil
 	}
-	if h.hostKey == nil {
-		key, err := rsa.GenerateKey(rand.Reader, 3072)
-		if err != nil {
-			return E.Cause(err, "sshvpn: generate host key")
-		}
-		der := x509.MarshalPKCS1PrivateKey(key)
-		block := &pem.Block{Type: "RSA PRIVATE KEY", Bytes: der}
-		signer, err := ssh.ParsePrivateKey(pem.EncodeToMemory(block))
-		if err != nil {
-			return E.Cause(err, "sshvpn: parse host key")
-		}
-		h.hostKey = signer
-	}
-	config := &ssh.ServerConfig{
+	h.sshConfig = &ssh.ServerConfig{
 		ServerVersion: "SSH-2.0-OpenSSH_9.0",
-		// AEAD ciphers first: aes128-gcm is ~2x aes128-ctr in this library
-		// (GCM gets the hardware path, CTR does not - benchmarked in
-		// TestSSHCiphers locally: 807 vs 435 MB/s loopback), and chacha20
-		// is the no-AESNI fallback. Order is a preference list; a client
+		// AEAD ciphers first: aes128-gcm is ~2x aes128-ctr in this
+		// library (GCM gets the AES-NI hardware path, CTR does not) -
+		// the live-path benchmark that motivated this measured 807 vs
+		// 435 MB/s loopback. Order is a preference list; a client
 		// without GCM still negotiates its best.
 		Config: ssh.Config{
 			Ciphers: []string{
@@ -232,8 +275,7 @@ func (h *Inbound) Start(stage adapter.StartStage) error {
 			return perm, nil
 		},
 	}
-	config.AddHostKey(h.hostKey)
-	h.sshConfig = config
+	h.sshConfig.AddHostKey(h.hostKey)
 	return h.listener.Start()
 }
 
@@ -241,11 +283,31 @@ func (h *Inbound) Close() error {
 	return h.listener.Close()
 }
 
-// NewConnection is the listener's ConnectionHandler entry: one TCP
-// connection = one SSH session = many channels.
+// NewConnection is the listener's ConnectionHandler entry and the whole
+// point of the redesign: one port, protocol picked per connection by the
+// first bytes on the wire.
+//
+//	0x16 0x03 ...      TLS ClientHello -> SSH inside TLS (DPI-safe)
+//	"S" "S" "H" "-"    cleartext banner -> plain SSH (legacy clients)
 func (h *Inbound) NewConnection(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
 	defer traffic.CloseOnPanic(ctx, h.logger, conn, onClose)
-	h.serve(ctx, conn, metadata, onClose)
+
+	// Peek enough bytes to tell a TLS record from an SSH banner. A TLS
+	// ClientHello always starts 0x16 (handshake) 0x03 (version major);
+	// an SSH banner always starts "SSH-". Both fit in 4 bytes.
+	br := bufio.NewReaderSize(conn, 4096)
+	first, err := br.Peek(4)
+	if err != nil {
+		N.CloseOnHandshakeFailure(conn, onClose, err)
+		return
+	}
+	peeked := &peekedConn{Reader: br, Conn: conn}
+	if first[0] == 0x16 && first[1] == 0x03 {
+		h.logger.DebugContext(ctx, "sshvpn: TLS-wrapped SSH connection from ", metadata.Source)
+		h.serve(ctx, tls.Server(peeked, h.tlsConfig), metadata, onClose)
+		return
+	}
+	h.serve(ctx, peeked, metadata, onClose)
 }
 
 func (h *Inbound) serve(ctx context.Context, conn net.Conn, metadata adapter.InboundContext, onClose N.CloseHandlerFunc) {
@@ -296,12 +358,8 @@ func (h *Inbound) serve(ctx context.Context, conn net.Conn, metadata adapter.Inb
 		}
 		go h.serveChannel(ctx, channel, req.OriginatorPort, chanMeta, user, fingerprint)
 	}
-	// The SSH session ended: every channel it opened has already been
-	// closed by x/crypto/ssh itself (a closed conn closes its channels),
-	// and each channel's own onClose has run by now or will when its
-	// router relay notices the EOF.
 	if onClose != nil {
-		onClose(err)
+		onClose(nil)
 	}
 }
 
@@ -322,16 +380,6 @@ func (h *Inbound) serveChannel(ctx context.Context, channel ssh.Channel, origina
 	source.Port = uint16(originatorPort)
 	metadata.Source = source
 
-	if metadata.Destination.Addr == udpRelayAddr.Addr && metadata.Destination.Port == udpRelayAddr.Port {
-		h.logger.InfoContext(ctx, "[", user, "] inbound UoT packet connection")
-		h.serveUoTChannel(ctx, chanConn, metadata, user, fingerprint)
-		return
-	}
-	if metadata.Destination.Addr == udpgwRelayAddr.Addr && metadata.Destination.Port == udpgwRelayAddr.Port {
-		h.logger.InfoContext(ctx, "[", user, "] inbound udpgw packet connection")
-		h.udpgwServe(ctx, chanConn, metadata, user, fingerprint)
-		return
-	}
 	h.logger.InfoContext(ctx, "[", user, "] inbound connection to ", metadata.Destination)
 	onClose := func(err error) { channel.Close() }
 	onClose = h.conns.TrackAuthenticated(h.Tag(), user, fingerprint, chanConn, onClose)
@@ -341,6 +389,15 @@ func (h *Inbound) serveChannel(ctx context.Context, channel ssh.Channel, origina
 	}
 	h.router.RouteConnectionEx(ctx, chanConn, metadata, onClose)
 }
+
+// peekedConn serves the buffered bytes first, then the raw connection -
+// the standard trick for protocol sniffing without consuming the stream.
+type peekedConn struct {
+	*bufio.Reader
+	net.Conn
+}
+
+func (c *peekedConn) Read(b []byte) (int, error) { return c.Reader.Read(b) }
 
 // channelConn adapts an ssh.Channel to net.Conn. SSH channels have no
 // deadlines - the same limitation sing-box's own SSH outbound documents
@@ -373,15 +430,13 @@ func (c *channelConn) RemoteAddr() net.Addr {
 	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)}
 }
 
-// SSH channels have no deadlines - the same stance sing-box's own SSH
-// outbound takes (chanConnWrapper). Returning os.ErrInvalid rather than
-// pretending keeps callers honest.
 func (c *channelConn) SetDeadline(time.Time) error      { return os.ErrInvalid }
 func (c *channelConn) SetReadDeadline(time.Time) error  { return os.ErrInvalid }
 func (c *channelConn) SetWriteDeadline(time.Time) error { return os.ErrInvalid }
 
-// constantTimeEquals compares two secrets without leaking length or prefix
-// information - crypto/subtle's ConstantTimeCompare with a length guard.
+// constantTimeEquals compares two secrets without leaking length or
+// prefix information - crypto/subtle's ConstantTimeCompare with a
+// length guard.
 func constantTimeEquals(a, b string) bool {
 	if len(a) != len(b) {
 		return false

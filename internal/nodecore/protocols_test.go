@@ -3,7 +3,7 @@ package nodecore
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -19,7 +19,6 @@ import (
 	"github.com/sagernet/sing-shadowsocks/shadowaead"
 	vmessclient "github.com/sagernet/sing-vmess"
 	M "github.com/sagernet/sing/common/metadata"
-	"github.com/sagernet/sing/common/uot"
 	"golang.org/x/crypto/ssh"
 
 	sshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
@@ -237,124 +236,63 @@ func sshvpnCase() protocolCase {
 			}
 			return &sshClientConn{Conn: conn, client: client}, nil
 		},
-		dialUDP: func(nodeAddr string, u testUser, dest M.Socksaddr) (net.PacketConn, error) {
-			client, err := sshDial(nodeAddr, u)
-			if err != nil {
-				return nil, err
-			}
-			// One direct-tcpip channel to the in-session relay address,
-			// then the sing UoT framing on top - exactly what the server
-			// side serves (serveUoTChannel).
-			channel, _, err := client.OpenChannel("direct-tcpip", ssh.Marshal(struct {
-				Host           string
-				Port           uint32
-				OriginatorIP   string
-				OriginatorPort uint32
-			}{Host: "127.0.0.2", Port: 1, OriginatorIP: "127.0.0.1", OriginatorPort: 0}))
-			if err != nil {
-				client.Close()
-				return nil, err
-			}
-			chanConn := &sshChannelPacketConn{channel: channel}
-			// UoT request then length-framed packets, per sing/common/uot.
-			if err := uot.WriteRequest(chanConn, uot.Request{Destination: dest, IsConnect: true}); err != nil {
-				channel.Close()
-				client.Close()
-				return nil, err
-			}
-			pc := uot.NewConn(chanConn, uot.Request{Destination: dest, IsConnect: true})
-			return &sshPacketConn{PacketConn: pc, client: client}, nil
-		},
+		dialUDP: nil, // sshvpn is TCP-only by design - see the package doc comment
 	}
 }
 
-// TestSSHVPNUDPGWRoundTrip: a real badvpn-udpgw client (the dialect
-// NetMod / HTTP Injector speak) opens one direct-tcpip channel to the
-// udpgw relay address inside an authenticated SSH session and echoes a
-// UDP datagram through it, plus a keepalive frame that must be ignored.
-func TestSSHVPNUDPGWRoundTrip(t *testing.T) {
+// TestSSHVPNTLSWrappedRoundTrip: the DPI-safe shape - the SSH session
+// runs inside a real TLS connection (a client that connects with TLS the
+// way SlipNet/HTTP-Injector's "SSH over TLS" mode does), and the same
+// inbound still serves a plain-SSH client on the same port afterwards.
+func TestSSHVPNTLSWrappedRoundTrip(t *testing.T) {
 	alice := testUser{"alice", "secret-1"}
 	pc := sshvpnCase()
 	f := startForkedNode(t, pc, alice)
 
-	client, err := sshDial(f.addr, alice)
+	// TLS client: InsecureSkipVerify matches this protocol's clients -
+	// the cert is a fresh self-signed leaf and SSH authenticates the host
+	// key, not the cert.
+	raw, err := tls.Dial("tcp", f.addr, &tls.Config{InsecureSkipVerify: true})
 	if err != nil {
-		t.Fatalf("ssh dial: %v", err)
+		t.Fatalf("tls dial: %v", err)
 	}
+	defer raw.Close()
+
+	sshCfg := &ssh.ClientConfig{
+		User:            alice.name,
+		Auth:            []ssh.AuthMethod{ssh.Password(alice.secret)},
+		HostKeyCallback: func(string, net.Addr, ssh.PublicKey) error { return nil },
+		Timeout:         5 * time.Second,
+	}
+	sconn, chans, reqs, err := ssh.NewClientConn(raw, f.addr, sshCfg)
+	if err != nil {
+		t.Fatalf("ssh handshake inside TLS: %v", err)
+	}
+	client := ssh.NewClient(sconn, chans, reqs)
 	defer client.Close()
 
-	channel, _, err := client.OpenChannel("direct-tcpip", ssh.Marshal(struct {
-		Host           string
-		Port           uint32
-		OriginatorIP   string
-		OriginatorPort uint32
-	}{Host: "127.0.0.1", Port: 7300, OriginatorIP: "127.0.0.1", OriginatorPort: 0}))
+	conn, err := client.Dial("tcp", f.tcpDest.String())
 	if err != nil {
-		t.Fatalf("open udpgw channel: %v", err)
+		t.Fatalf("channel: %v", err)
 	}
-	defer channel.Close()
-
-	writeUdpgw := func(flags byte, conid uint16, ip net.IP, port uint16, payload []byte) error {
-		frame := []byte{flags, byte(conid), byte(conid >> 8)}
-		if flags&0x08 != 0 { // IPv6 flag bit
-			var ip16 [16]byte
-			copy(ip16[:], ip.To16())
-			frame = append(frame, ip16[:]...)
-			frame = binary.BigEndian.AppendUint16(frame, port)
-		} else {
-			ip4 := ip.To4()
-			frame = append(frame, ip4...)
-			frame = binary.BigEndian.AppendUint16(frame, port)
-		}
-		frame = append(frame, payload...)
-		_, err := channel.Write(frame)
-		return err
+	defer conn.Close()
+	if err := echoRoundTrip(t, conn, "ssh-inside-tls"); err != nil {
+		t.Fatalf("tls-wrapped round trip: %v", err)
 	}
 
-	// keepalive: flags 0x01, no address, no payload - the server must
-	// read it and keep going. Header only, exactly 3 bytes.
-	if _, err := channel.Write([]byte{0x01, 0x00, 0x00}); err != nil {
-		t.Fatalf("write keepalive: %v", err)
+	// Same port, plain SSH still served side by side.
+	plain, err := sshDial(f.addr, alice)
+	if err != nil {
+		t.Fatalf("plain dial: %v", err)
 	}
-
-	udpDest := f.udpDest
-	if err := writeUdpgw(0x00, 7, udpDest.IP, uint16(udpDest.Port), []byte("udp-over-udpgw")); err != nil {
-		t.Fatalf("write datagram: %v", err)
+	defer plain.Close()
+	pconn, err := plain.Dial("tcp", f.tcpDest.String())
+	if err != nil {
+		t.Fatalf("plain channel: %v", err)
 	}
-
-	// Read frames until our echoed datagram shows up on conid 7.
-	buf := make([]byte, 4096)
-	for {
-		n, err := channel.Read(buf)
-		if err != nil {
-			t.Fatalf("read udpgw frame: %v", err)
-		}
-		frame := buf[:n]
-		if len(frame) < 3 {
-			continue
-		}
-		flags := frame[0]
-		conid := binary.LittleEndian.Uint16(frame[1:3])
-		if conid != 7 || flags&0x01 != 0 {
-			continue // not our datagram
-		}
-		body := frame[3:]
-		var payload []byte
-		if flags&0x08 != 0 {
-			if len(body) < 18 {
-				t.Fatalf("short ipv6 frame")
-			}
-			payload = body[18:]
-		} else {
-			if len(body) < 6 {
-				t.Fatalf("short ipv4 frame")
-			}
-			payload = body[6:]
-		}
-		if string(payload) != "udp-over-udpgw" {
-			t.Fatalf("echo mismatch: %q", payload)
-		}
-		break
+	defer pconn.Close()
+	if err := echoRoundTrip(t, pconn, "plain-ssh-same-port"); err != nil {
+		t.Fatalf("plain round trip: %v", err)
 	}
 }
 
@@ -381,36 +319,6 @@ type sshClientConn struct {
 
 func (c *sshClientConn) Close() error {
 	c.Conn.Close()
-	return c.client.Close()
-}
-
-// sshChannelPacketConn adapts an ssh.Channel to the net.Conn shape the UoT
-// framing functions read from and write to.
-type sshChannelPacketConn struct {
-	channel ssh.Channel
-}
-
-func (c *sshChannelPacketConn) Read(b []byte) (int, error)  { return c.channel.Read(b) }
-func (c *sshChannelPacketConn) Write(b []byte) (int, error) { return c.channel.Write(b) }
-func (c *sshChannelPacketConn) Close() error                { return c.channel.Close() }
-func (c *sshChannelPacketConn) LocalAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0}
-}
-func (c *sshChannelPacketConn) RemoteAddr() net.Addr {
-	return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 2), Port: 1}
-}
-func (c *sshChannelPacketConn) SetDeadline(time.Time) error      { return nil }
-func (c *sshChannelPacketConn) SetReadDeadline(time.Time) error  { return nil }
-func (c *sshChannelPacketConn) SetWriteDeadline(time.Time) error { return nil }
-
-// sshPacketConn closes the SSH session behind the packet conn.
-type sshPacketConn struct {
-	net.PacketConn
-	client *ssh.Client
-}
-
-func (c *sshPacketConn) Close() error {
-	c.PacketConn.Close()
 	return c.client.Close()
 }
 
@@ -562,13 +470,17 @@ func TestForkedProtocolsRoundTrip(t *testing.T) {
 			t.Fatalf("tcp round trip: %v", err)
 		}
 
-		pconn, err := pc.dialUDP(f.addr, alice, M.SocksaddrFromNet(f.udpDest))
-		if err != nil {
-			t.Fatalf("dial udp: %v", err)
-		}
-		t.Cleanup(func() { pconn.Close() })
-		if err := udpEchoOnce(pconn, f.udpDest, []byte("udp-through-the-fork")); err != nil {
-			t.Fatalf("udp round trip: %v", err)
+		if pc.dialUDP == nil {
+			t.Logf("%s: no UDP leg, skipping udp part", pc.name)
+		} else {
+			pconn, err := pc.dialUDP(f.addr, alice, M.SocksaddrFromNet(f.udpDest))
+			if err != nil {
+				t.Fatalf("dial udp: %v", err)
+			}
+			t.Cleanup(func() { pconn.Close() })
+			if err := udpEchoOnce(pconn, f.udpDest, []byte("udp-through-the-fork")); err != nil {
+				t.Fatalf("udp round trip: %v", err)
+			}
 		}
 
 		f.requireRejected(t, testUser{"mallory", testSecret(pc, 99)})
@@ -694,25 +606,29 @@ func TestForkedProtocolsTrafficExact(t *testing.T) {
 			t.Errorf("usage has entries beyond alice and bob: %+v", got)
 		}
 
-		pconn, err := pc.dialUDP(f.addr, alice, M.SocksaddrFromNet(f.udpDest))
-		if err != nil {
-			t.Fatalf("dial udp: %v", err)
-		}
-		t.Cleanup(func() { pconn.Close() })
-		wantUDP := traffic.Usage{}
-		for _, size := range []int{31, 1200} {
-			if err := udpEchoOnce(pconn, f.udpDest, bytes.Repeat([]byte{'u'}, size)); err != nil {
-				t.Fatalf("alice udp round trip of %d bytes: %v", size, err)
+		if pc.dialUDP == nil {
+			t.Logf("%s: no UDP leg, skipping udp part", pc.name)
+		} else {
+			pconn, err := pc.dialUDP(f.addr, alice, M.SocksaddrFromNet(f.udpDest))
+			if err != nil {
+				t.Fatalf("dial udp: %v", err)
 			}
-			wantUDP.Up += int64(size)
-			wantUDP.Down += int64(size)
-		}
-		got = drainUntil(t, f.mgr, "alice", wantUDP)
-		if got["alice"] != wantUDP {
-			t.Errorf("alice udp usage = %+v, want %+v", got["alice"], wantUDP)
-		}
-		if len(got) != 1 {
-			t.Errorf("udp usage has entries beyond alice: %+v", got)
+			t.Cleanup(func() { pconn.Close() })
+			wantUDP := traffic.Usage{}
+			for _, size := range []int{31, 1200} {
+				if err := udpEchoOnce(pconn, f.udpDest, bytes.Repeat([]byte{'u'}, size)); err != nil {
+					t.Fatalf("alice udp round trip of %d bytes: %v", size, err)
+				}
+				wantUDP.Up += int64(size)
+				wantUDP.Down += int64(size)
+			}
+			got = drainUntil(t, f.mgr, "alice", wantUDP)
+			if got["alice"] != wantUDP {
+				t.Errorf("alice udp usage = %+v, want %+v", got["alice"], wantUDP)
+			}
+			if len(got) != 1 {
+				t.Errorf("udp usage has entries beyond alice: %+v", got)
+			}
 		}
 	})
 }

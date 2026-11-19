@@ -40,8 +40,8 @@ import (
 	"github.com/legendary1205/rapido-go/internal/hostmetrics"
 	"github.com/legendary1205/rapido-go/internal/nodecore"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
-	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	"github.com/legendary1205/rapido-go/internal/nodecore/spread"
+	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
 	"github.com/legendary1205/rapido-go/internal/nodelog"
 	"github.com/legendary1205/rapido-go/internal/tunnelhealth"
@@ -1201,14 +1201,20 @@ func buildOptionsPlan(req startRequest) (sbox.Options, nodePlan, error) {
 				// An SSH server rather than a sing-box fork (see
 				// internal/nodecore/sshvpn's own doc comment) - its own
 				// options type, TrojanUser credentials (name+password:
-				// exactly what SSH password auth carries), TCP via RFC
-				// 4254 direct-tcpip channels and UDP via the sing UoT
-				// framing on a channel to the in-session relay address.
+				// exactly what SSH password auth carries), TCP only via
+				// RFC 4254 direct-tcpip channels. TLS-wrapped on the same
+				// port when the inbound carries a TLS block (the DPI-safe
+				// shape); plain SSH for clients with no TLS mode.
 				users := usersOnce(&built, in.Users, func(u userSpec) sbox.TrojanUser { return sbox.TrojanUser{Name: u.Name, Password: u.Password} })
-				inbounds = append(inbounds, sbox.Inbound{Type: "sshvpn", Tag: tag, Options: &forkedsshvpn.InboundOptions{
+				opts := &forkedsshvpn.InboundOptions{
 					ListenOptions: listenOptions,
 					Users:         users,
-				}})
+				}
+				if tlsOpts != nil {
+					opts.Certificate = tlsOpts.Certificate[0]
+					opts.Key = tlsOpts.Key[0]
+				}
+				inbounds = append(inbounds, sbox.Inbound{Type: "sshvpn", Tag: tag, Options: opts})
 			}
 		}
 	}

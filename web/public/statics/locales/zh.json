@@ -1529,11 +1529,5 @@
   "rapido.coreForm.link.error.method": "不支持 shadowsocks 加密方法 {{value}}。",
   "rapido.coreForm.link.error.plugin": "不支持 shadowsocks 插件({{value}})。",
   "rapido.coreForm.link.error.obfs": "出站不支持 Hysteria2 混淆({{value}})。",
-  "rapido.coreForm.link.error.pin": "出站不支持证书固定(pinSHA256)。",
-  "rapido.coreForm.field.inboundTransport": "传输方式",
-  "rapido.coreForm.hint.sshvpnTransport": "TCP 仅代理 TCP 通道；UDP 同时在 127.0.0.1:7300 上提供 badvpn udpgw 方言（NetMod / HTTP Injector）。",
-  "rapido.inbounds.quickAdd.transport": "传输方式",
-  "rapido.inbounds.quickAdd.transportTcp": "TCP",
-  "rapido.inbounds.quickAdd.transportUdp": "UDP (UDPGW)",
-  "rapido.inbounds.quickAdd.sshvpnTransportHint": "TCP 仅代理 TCP 通道；UDP 在同一端口开放 udpgw 中继，供 NetMod / HTTP Injector 使用。"
+  "rapido.coreForm.link.error.pin": "出站不支持证书固定(pinSHA256)。"
 }

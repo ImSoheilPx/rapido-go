@@ -44,6 +44,10 @@ func inboundSyncEntryFromDetail(in inboundDetailDTO) inboundSyncEntry {
 		CongestionControl: in.CongestionControl, ZeroRTTHandshake: in.ZeroRTTHandshake,
 		SnellPSK: in.SnellPSK, SnellV6Mode: in.SnellV6Mode, HysteriaObfsPassword: in.HysteriaObfsPassword,
 		ShadowTLSInnerMethod: in.ShadowTLSInnerMethod, ShadowTLSInnerPassword: in.ShadowTLSInnerPassword,
+		MtprotoTlsDomain:     in.MtprotoTlsDomain,
+		WgServerPrivateKey:   in.WgServerPrivateKey,
+		WgSubnet:             in.WgSubnet,
+		WgMtu:                in.WgMtu,
 	}
 }
 

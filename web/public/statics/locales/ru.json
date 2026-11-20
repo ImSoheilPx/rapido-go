@@ -1541,5 +1541,7 @@
   "rapido.coreForm.link.error.method": "Метод shadowsocks {{value}} не поддерживается.",
   "rapido.coreForm.link.error.plugin": "Плагины shadowsocks ({{value}}) не поддерживаются.",
   "rapido.coreForm.link.error.obfs": "Обфускация Hysteria2 ({{value}}) для исходящих не поддерживается.",
-  "rapido.coreForm.link.error.pin": "Закреплённый сертификат (pinSHA256) для исходящих не поддерживается."
+  "rapido.coreForm.link.error.pin": "Закреплённый сертификат (pinSHA256) для исходящих не поддерживается.",
+  "rapido.coreForm.hint.wgKey": "Собственный ключ сервера. Оставьте пустым — сервер сгенерирует его при создании.",
+  "rapido.coreForm.hint.wgSubnet": "IPv4 от /16 до /24. Каждый пользователь получает один адрес из этой сети."
 }

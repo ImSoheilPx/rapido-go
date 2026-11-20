@@ -1538,5 +1538,7 @@
   "rapido.coreForm.link.error.method": "روش رمزنگاری shadowsocks با نام {{value}} پشتیبانی نمی‌شود.",
   "rapido.coreForm.link.error.plugin": "پلاگین‌های shadowsocks ({{value}}) پشتیبانی نمی‌شوند.",
   "rapido.coreForm.link.error.obfs": "مبهم‌سازی Hysteria2 ({{value}}) برای خروجی‌ها پشتیبانی نمی‌شود.",
-  "rapido.coreForm.link.error.pin": "پین کردن گواهی (pinSHA256) برای خروجی‌ها پشتیبانی نمی‌شود."
+  "rapido.coreForm.link.error.pin": "پین کردن گواهی (pinSHA256) برای خروجی‌ها پشتیبانی نمی‌شود.",
+  "rapido.coreForm.hint.wgKey": "کلید اختصاصی سرور. خالی بگذارید تا هنگام ساخت، سرور یک کلید بسازد.",
+  "rapido.coreForm.hint.wgSubnet": "IPv4 از /16 تا /24. هر کاربر یک آدرس از آن می‌گیرد که از حساب او مشتق می‌شود."
 }

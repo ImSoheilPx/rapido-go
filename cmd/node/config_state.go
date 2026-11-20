@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -163,6 +164,17 @@ func splitUsableUsers(protocol string, users []userSpec) ([]userSpec, []string) 
 // proxysettings mints exactly this, and the inbound's UpdateUsers refuses
 // anything else at apply time; catching it here keeps a bad row from
 // costing a node the whole list.
+// validateWireguardPublicKey enforces the base64-std 32-byte shape every
+// peer public key takes (proxysettings mints exactly this; the inbound's
+// UpdateUsers refuses anything else at apply time).
+func validateWireguardPublicKey(publicKey string) error {
+	raw, err := base64.StdEncoding.DecodeString(publicKey)
+	if err != nil || len(raw) != 32 {
+		return fmt.Errorf("invalid wireguard public key (want base64 of 32 bytes)")
+	}
+	return nil
+}
+
 func validateMtprotoSecret(secret string) error {
 	raw, err := hex.DecodeString(secret)
 	if err != nil || len(raw) != 16 {
@@ -189,6 +201,8 @@ func userProblem(protocol string, i int, u userSpec, names, secrets map[string]b
 		secret = u.Name
 	case "mtproto":
 		secret = u.MtprotoSecret
+	case "wireguard":
+		secret = u.WgPublicKey
 	}
 	if secret == "" {
 		return fmt.Sprintf("missing credential for account %d in %s: %s", i, protocol, name)
@@ -201,6 +215,13 @@ func userProblem(protocol string, i int, u userSpec, names, secrets map[string]b
 	case "mtproto":
 		if err := validateMtprotoSecret(secret); err != nil {
 			return fmt.Sprintf("%v: %s", err, name)
+		}
+	case "wireguard":
+		if err := validateWireguardPublicKey(secret); err != nil {
+			return fmt.Sprintf("%v: %s", err, name)
+		}
+		if u.WgIndex < 2 {
+			return fmt.Sprintf("wireguard tunnel index must be at least 2 (.1 is the server): %s", name)
 		}
 	}
 	if secrets[secret] {

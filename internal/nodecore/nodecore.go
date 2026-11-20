@@ -14,17 +14,18 @@ import (
 	forkedanytls "github.com/legendary1205/rapido-go/internal/nodecore/anytls"
 	forkedhysteria "github.com/legendary1205/rapido-go/internal/nodecore/hysteria"
 	forkedhysteria2 "github.com/legendary1205/rapido-go/internal/nodecore/hysteria2"
+	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
 	forkednaive "github.com/legendary1205/rapido-go/internal/nodecore/naive"
 	forkedshadowsocks "github.com/legendary1205/rapido-go/internal/nodecore/shadowsocks"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
-	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
-	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
 	forkedsnell "github.com/legendary1205/rapido-go/internal/nodecore/snell"
+	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
 	forkedtrojan "github.com/legendary1205/rapido-go/internal/nodecore/trojan"
 	forkedtuic "github.com/legendary1205/rapido-go/internal/nodecore/tuic"
 	forkedvless "github.com/legendary1205/rapido-go/internal/nodecore/vless"
 	forkedvmess "github.com/legendary1205/rapido-go/internal/nodecore/vmess"
+	forkedwg "github.com/legendary1205/rapido-go/internal/nodecore/wg"
 )
 
 // Node wraps a running sing-box instance built from the restricted
@@ -98,6 +99,13 @@ type User struct {
 	// chars - like UserKey, a protocol whose per-user credential is not
 	// a password at all (it keys an HMAC, never compared as text).
 	MtprotoSecret string // mtproto
+	// WgPublicKey/WgPresharedKey/WgIndex is the wireguard user's peer
+	// identity: the public half of the Curve25519 keypair in
+	// proxies.settings, and the panel users.id the per-inbound /32 is
+	// derived from (see internal/nodecore/wg's own doc comment).
+	WgPublicKey    string // wireguard
+	WgPresharedKey string // wireguard
+	WgIndex        uint32 // wireguard
 }
 
 // UpdateUsers replaces the user list on an already-running inbound identified
@@ -158,6 +166,10 @@ func (n *Node) UpdateUsers(tag, protocol string, users []User) error {
 	case "mtproto":
 		return n.UpdateMtprotoUsers(tag, convertUsers(n, users, func(u User) forkedmtproto.MtprotoUser {
 			return forkedmtproto.MtprotoUser{Name: u.Name, Secret: u.MtprotoSecret}
+		}))
+	case "wireguard":
+		return n.UpdateWireguardUsers(tag, convertUsers(n, users, func(u User) forkedwg.WgUser {
+			return forkedwg.WgUser{Name: u.Name, PublicKey: u.WgPublicKey, PresharedKey: u.WgPresharedKey, Index: u.WgIndex}
 		}))
 	default:
 		return fmt.Errorf("nodecore: unsupported protocol %q", protocol)
@@ -321,6 +333,29 @@ func (n *Node) UpdateSSHVPNUsers(tag string, users []option.TrojanUser) error {
 // UpdateMtprotoUsers is UpdateUsers for an MTProto inbound - it fails,
 // changing nothing, if a user's secret is not 32 hex chars (16 bytes), the
 // one shape the FakeTLS dispatch can key an HMAC with.
+// PollWireguardUsage forces one usage poll on a running wireguard
+// inbound - the accounting path the production 30s ticker drives. Exported
+// for the wireguard package's external tests (which cannot reach the
+// private poller through this package's own import cycle rules).
+func (n *Node) PollWireguardUsage(tag string) error {
+	in, err := runningInbound[*forkedwg.Inbound](n, tag, "wireguard")
+	if err != nil {
+		return err
+	}
+	in.PollForTest()
+	return nil
+}
+
+// UpdateWireguardUsers is UpdateUsers for a wireguard inbound - the hot
+// peer add/remove the whole inbound exists for.
+func (n *Node) UpdateWireguardUsers(tag string, users []forkedwg.WgUser) error {
+	in, err := runningInbound[*forkedwg.Inbound](n, tag, "wireguard")
+	if err != nil {
+		return err
+	}
+	return in.UpdateUsers(users)
+}
+
 func (n *Node) UpdateMtprotoUsers(tag string, users []forkedmtproto.MtprotoUser) error {
 	in, err := runningInbound[*forkedmtproto.Inbound](n, tag, "MTProto")
 	if err != nil {

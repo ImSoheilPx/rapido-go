@@ -40,6 +40,15 @@ type nodeConfigUserSpec struct {
 	// inbound-level SNI it composes with is MtprotoTlsDomain on
 	// nodeConfigInboundSpec).
 	MtprotoSecret string `json:"mtproto_secret,omitempty"`
+	// WgPublicKey/WgPresharedKey is the wireguard user's peer identity -
+	// the public half of the Curve25519 keypair in proxies.settings
+	// (proxysettings.WireguardSettings). The peer's tunnel IP is NOT
+	// here: it is derived per-inbound from the user's own numeric id
+	// (WgIndex) against that inbound's WgSubnet, so one credential row
+	// serves every wireguard inbound on the panel.
+	WgPublicKey    string `json:"wg_public_key,omitempty"`
+	WgPresharedKey string `json:"wg_preshared_key,omitempty"`
+	WgIndex        uint32 `json:"wg_index,omitempty"`
 }
 
 type nodeConfigRealitySpec struct {
@@ -150,6 +159,14 @@ type nodeConfigInboundSpec struct {
 	// inbounds.go's inboundDetailDTO for what it means.
 	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
 
+	// The wireguard inbound's own device parameters - see
+	// inbounds.go's inboundDetailDTO for what each means. The server
+	// PRIVATE key travels here (the node needs it to be the device);
+	// the public key is derived everywhere else and never stored.
+	WgServerPrivateKey string `json:"wg_server_private_key,omitempty"`
+	WgSubnet           string `json:"wg_subnet,omitempty"`
+	WgMtu              uint32 `json:"wg_mtu,omitempty"`
+
 	// usersKey is which nodeConfigSnapshot.usersJSON entry holds this
 	// inbound's already-encoded Users - the protocol, or its no-flow variant
 	// (see flowApplies). Not part of the wire format.
@@ -193,6 +210,9 @@ type nodeConfigInboundWire struct {
 
 	ShadowTLSHandshakeServer string `json:"shadowtls_handshake_server,omitempty"`
 	MtprotoTlsDomain         string `json:"mtproto_tls_domain,omitempty"`
+	WgServerPrivateKey       string `json:"wg_server_private_key,omitempty"`
+	WgSubnet                 string `json:"wg_subnet,omitempty"`
+	WgMtu                    uint32 `json:"wg_mtu,omitempty"`
 }
 
 // plainHostName keeps what can be dialled as it stands: a host's SNI can also be
@@ -347,6 +367,13 @@ func (h *Handler) loadNodeConfigSnapshot(ctx context.Context, version int64) (*n
 			spec.Password = settings.SSHVPN.Password
 		case "mtproto":
 			spec.MtprotoSecret = settings.MTProto.Secret
+		case "wireguard":
+			spec.WgPublicKey = settings.Wireguard.PublicKey
+			spec.WgPresharedKey = settings.Wireguard.PresharedKey
+			// The tunnel IP is DERIVED from the panel's users.id (see
+			// internal/nodecore/wg.AddrForIndex): unique, stable across
+			// renames, and never stored.
+			spec.WgIndex = uint32(p.ID)
 		default:
 			continue
 		}
@@ -450,6 +477,30 @@ func (h *Handler) loadNodeConfigSnapshot(ctx context.Context, version int64) (*n
 			if spec.MtprotoTlsDomain == "" {
 				spec.MtprotoTlsDomain = "www.google.com"
 			}
+		case "wireguard":
+			// One inbound = one port = one subnet: a multi-port entry
+			// would fan out into one listener per port, each needing
+			// its own subnet the model has no place to name. The
+			// panel's own validation refuses it (inbounds.go); this is
+			// the backstop for rows written before that or by an
+			// older client, dropping the inbound with a clear
+			// unservable note instead of failing the whole list.
+			if len(multiListenPorts(in.Ports)) > 1 {
+				unservable = append(unservable, "inbound "+in.Tag+": wireguard takes exactly one listen port (one inbound = one subnet)")
+				continue
+			}
+			spec.WgServerPrivateKey = in.WgServerPrivateKey.String
+			if spec.WgServerPrivateKey == "" {
+				unservable = append(unservable, "inbound "+in.Tag+": wireguard inbound has no wg_server_private_key")
+				continue
+			}
+			spec.WgSubnet = in.WgSubnet.String
+			if spec.WgSubnet == "" {
+				spec.WgSubnet = "10.7.0.0/24"
+			}
+			if in.WgMtu.Valid {
+				spec.WgMtu = uint32(in.WgMtu.Int32)
+			}
 		}
 		if spec.Users == nil {
 			spec.Users = []nodeConfigUserSpec{}
@@ -537,7 +588,7 @@ func (s nodeConfigSchema) cacheKey(p nodeProfile) string {
 // one in an older agent's config.
 func schemaRefusesProtocol(protocol string) bool {
 	switch protocol {
-	case "mtproto":
+	case "mtproto", "wireguard":
 		return true
 	}
 	return false
@@ -643,6 +694,9 @@ func (s *nodeConfigSnapshot) renderSchema(p nodeProfile, schema nodeConfigSchema
 			ShadowTLSInnerMethod: in.ShadowTLSInnerMethod, ShadowTLSInnerPassword: in.ShadowTLSInnerPassword,
 			ShadowTLSHandshakeServer: in.ShadowTLSHandshakeServer,
 			MtprotoTlsDomain:         in.MtprotoTlsDomain,
+			WgServerPrivateKey:       in.WgServerPrivateKey,
+			WgSubnet:                 in.WgSubnet,
+			WgMtu:                    in.WgMtu,
 		})
 	}
 

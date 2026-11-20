@@ -249,6 +249,14 @@ type EffectiveHost struct {
 	// FakeTLS SNI its own tg:// links compose the secret with.
 	MtprotoTlsDomain string `json:"mtproto_tls_domain"`
 
+	// Only meaningful for a peer host whose Protocol is "wireguard" -
+	// the derived server PUBLIC key and device parameters its own
+	// wireguard:// links and wg-conf artifacts compose with. The
+	// private key never leaves the panel that owns the inbound.
+	WgServerPublicKey string `json:"wg_server_public_key,omitempty"`
+	WgSubnet          string `json:"wg_subnet,omitempty"`
+	WgMtu             uint32 `json:"wg_mtu,omitempty"`
+
 	// Remark is the raw, unformatted template ({USERNAME} etc. still
 	// literal) - the RECEIVING panel formats it with its own user's own
 	// variables, never this peer's, since {DATA_USAGE}/{EXPIRE_DATE}/etc.

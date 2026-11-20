@@ -1530,5 +1530,7 @@
   "rapido.coreForm.link.error.method": "不支持 shadowsocks 加密方法 {{value}}。",
   "rapido.coreForm.link.error.plugin": "不支持 shadowsocks 插件({{value}})。",
   "rapido.coreForm.link.error.obfs": "出站不支持 Hysteria2 混淆({{value}})。",
-  "rapido.coreForm.link.error.pin": "出站不支持证书固定(pinSHA256)。"
+  "rapido.coreForm.link.error.pin": "出站不支持证书固定(pinSHA256)。",
+  "rapido.coreForm.hint.wgKey": "服务器自己的密钥。留空则创建时由服务器生成。",
+  "rapido.coreForm.hint.wgSubnet": "IPv4 /16 到 /24。每个用户从中获得一个由其账号派生的地址。"
 }

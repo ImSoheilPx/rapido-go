@@ -39,11 +39,12 @@ import (
 	"github.com/legendary1205/rapido-go/internal/controlurl"
 	"github.com/legendary1205/rapido-go/internal/hostmetrics"
 	"github.com/legendary1205/rapido-go/internal/nodecore"
+	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
 	"github.com/legendary1205/rapido-go/internal/nodecore/spread"
-	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
 	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	"github.com/legendary1205/rapido-go/internal/nodecore/traffic"
+	forkedwg "github.com/legendary1205/rapido-go/internal/nodecore/wg"
 	"github.com/legendary1205/rapido-go/internal/nodelog"
 	"github.com/legendary1205/rapido-go/internal/tunnelhealth"
 )
@@ -513,6 +514,13 @@ type inboundSpec struct {
 	// SNI the whole listener emulates; empty means www.google.com (the
 	// panel's own default, nodeconfig.go's inbound-spec case).
 	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
+	// The wireguard device's own parameters - WgServerPrivateKey is the
+	// endpoint's Curve25519 secret (the node must hold it to BE the
+	// device), WgSubnet the per-inbound tunnel space (empty =
+	// 10.7.0.0/24), WgMtu empty = the fork's 1408 default.
+	WgServerPrivateKey string  `json:"wg_server_private_key,omitempty"`
+	WgSubnet           string  `json:"wg_subnet,omitempty"`
+	WgMtu              *uint32 `json:"wg_mtu,omitempty"`
 }
 
 func (in inboundSpec) ports() []uint16 {
@@ -541,6 +549,10 @@ type userSpec struct {
 	// MtprotoSecret is the mtproto user's 16-byte FakeTLS key, 32 hex
 	// chars - mirrors nodeConfigUserSpec's own field of the same name.
 	MtprotoSecret string `json:"mtproto_secret,omitempty"` // mtproto
+	// The wireguard user's peer identity - mirrors nodeConfigUserSpec.
+	WgPublicKey    string `json:"wg_public_key,omitempty"`    // wireguard
+	WgPresharedKey string `json:"wg_preshared_key,omitempty"` // wireguard
+	WgIndex        uint32 `json:"wg_index,omitempty"`         // wireguard
 }
 
 type tlsSpec struct {
@@ -827,7 +839,7 @@ func (s *server) handleUpdateUsers(w http.ResponseWriter, r *http.Request) {
 // its user list replaced on the running listener.
 func hotUpdatableProtocol(protocol string) bool {
 	switch protocol {
-	case "vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn", "mtproto":
+	case "vless", "vmess", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn", "mtproto", "wireguard":
 		return true
 	}
 	return false
@@ -836,7 +848,7 @@ func hotUpdatableProtocol(protocol string) bool {
 func nodeUsers(specs []userSpec) []nodecore.User {
 	users := make([]nodecore.User, len(specs))
 	for i, u := range specs {
-		users[i] = nodecore.User{Name: u.Name, UUID: u.UUID, Password: u.Password, Flow: u.Flow, UserKey: u.UserKey, MtprotoSecret: u.MtprotoSecret}
+		users[i] = nodecore.User{Name: u.Name, UUID: u.UUID, Password: u.Password, Flow: u.Flow, UserKey: u.UserKey, MtprotoSecret: u.MtprotoSecret, WgPublicKey: u.WgPublicKey, WgPresharedKey: u.WgPresharedKey, WgIndex: u.WgIndex}
 	}
 	return users
 }
@@ -1238,6 +1250,30 @@ func buildOptionsPlan(req startRequest) (sbox.Options, nodePlan, error) {
 					ListenOptions: listenOptions,
 					Users:         users,
 					TlsDomain:     in.MtprotoTlsDomain,
+				}})
+			case "wireguard":
+				// The userspace WireGuard endpoint (see
+				// internal/nodecore/wg's own doc comment): one UDP
+				// port, one subnet, peers derived per user. The
+				// panel refuses multi-port for the protocol; this is
+				// the backstop that keeps a hand-written config from
+				// forking the subnet across listeners.
+				if len(in.ports()) > 1 {
+					return sbox.Options{}, nodePlan{}, fmt.Errorf("inbound %q: wireguard takes exactly one listen port (one inbound = one subnet)", in.Tag)
+				}
+				var mtu uint32
+				if in.WgMtu != nil {
+					mtu = *in.WgMtu
+				}
+				users := usersOnce(&built, in.Users, func(u userSpec) forkedwg.WgUser {
+					return forkedwg.WgUser{Name: u.Name, PublicKey: u.WgPublicKey, PresharedKey: u.WgPresharedKey, Index: u.WgIndex}
+				})
+				inbounds = append(inbounds, sbox.Inbound{Type: "wgvpn", Tag: tag, Options: &forkedwg.InboundOptions{
+					ListenOptions: listenOptions,
+					Users:         users,
+					Subnet:        in.WgSubnet,
+					MTU:           mtu,
+					PrivateKey:    in.WgServerPrivateKey,
 				}})
 			}
 		}
@@ -1887,7 +1923,7 @@ type pulledConfig struct {
 // implement that just answers 200 with the full body, which the version
 // comparison below handles exactly as it always did.
 func (s *server) pullOnce(ctx context.Context, client *http.Client, cfg config) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.PanelURL+"/api/internal/node-config?schema=5", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.PanelURL+"/api/internal/node-config?schema=6", nil)
 	if err != nil {
 		s.logger.Error("pull config: build request", "error", err)
 		return

@@ -31,7 +31,7 @@ import { Item, NEEDS_SERVER_TYPES, asList, isLeafOutboundType, str } from "./cor
 
 export type FieldKind = "text" | "secret" | "number" | "select" | "bool" | "list" | "ports" | "pem" | "pick";
 
-export type GeneratorKind = "password" | "psk" | "shortId" | "ss2022Key" | "realityKey";
+export type GeneratorKind = "password" | "psk" | "shortId" | "ss2022Key" | "realityKey" | "wgKey";
 
 export type ChoiceSource = "outboundTargets" | "balancerMembers" | "inboundTags" | "ownMembers";
 
@@ -241,7 +241,7 @@ export const dnsFields = (s: Item): FieldSpec[] => {
 };
 
 const TRANSPORT_PROTOCOLS = new Set(["vless", "vmess", "trojan", "shadowsocks"]);
-const FIXED_SECURITY = new Set<string>([...TLS_REQUIRED_PROTOCOLS, "snell", "shadowtls", "mtproto"]);
+const FIXED_SECURITY = new Set<string>([...TLS_REQUIRED_PROTOCOLS, "snell", "shadowtls", "mtproto", "wireguard"]);
 
 /** `tagLocked`: an inbound the server already has keeps its tag, because hosts hang off it. */
 export const inboundFields = (i: Item, tagLocked: boolean): FieldSpec[] => {
@@ -311,6 +311,13 @@ export const inboundFields = (i: Item, tagLocked: boolean): FieldSpec[] => {
     case "mtproto":
       fields.push({ key: "mtproto_tls_domain", kind: "text", placeholder: "www.google.com", hint: "mtprotoTlsDomain" });
       break;
+    case "wireguard":
+      fields.push(
+        { key: "wg_server_private_key", kind: "secret", generate: "wgKey", wide: true, hint: "wgKey" },
+        { key: "wg_subnet", kind: "text", placeholder: "10.7.0.0/24", hint: "wgSubnet" },
+        { key: "wg_mtu", kind: "number", min: 1200, max: 1500, placeholder: "1408" }
+      );
+      break;
   }
   return fields;
 };
@@ -334,6 +341,7 @@ const INBOUND_KEYS = [
   "reality_server_port", "tls_certificate", "tls_key", "tls_server_name", "hysteria2_obfs_password", "up_mbps", "down_mbps",
   "congestion_control", "zero_rtt_handshake", "snell_psk", "snell_v6_mode", "hysteria_obfs_password",
   "shadowtls_inner_method", "shadowtls_inner_password", "mtproto_tls_domain",
+  "wg_server_private_key", "wg_subnet", "wg_mtu",
 ];
 
 const pruned = (item: Item, known: readonly string[], fields: readonly FieldSpec[]): Item => {

@@ -11,6 +11,8 @@ import (
 	"net/netip"
 	"strings"
 
+	"golang.org/x/crypto/curve25519"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -174,12 +176,25 @@ type inboundDetailDTO struct {
 	// every ClientHello must carry it. See internal/nodecore/mtproto's
 	// own doc comment.
 	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
+
+	// The three wireguard fields only apply to protocol="wireguard".
+	// WgServerPrivateKey is the endpoint's own Curve25519 secret (base64
+	// std, 32 bytes) - secret, write-only in spirit; the DTO exposes the
+	// DERIVED public key (WgServerPublicKey, never stored) next to it.
+	// WgSubnet is the per-inbound tunnel space users get /32s from
+	// (IPv4 /16-/24; empty = 10.7.0.0/24). WgMtu 1200-1500, empty = the
+	// node's own 1408 default. See internal/nodecore/wg's own doc
+	// comment for the subnet/user-address model.
+	WgServerPrivateKey string  `json:"wg_server_private_key,omitempty"`
+	WgServerPublicKey  string  `json:"wg_server_public_key,omitempty"`
+	WgSubnet           string  `json:"wg_subnet,omitempty"`
+	WgMtu              *int32  `json:"wg_mtu,omitempty"`
 }
 
 func toInboundDetailDTO(in generated.Inbound) inboundDetailDTO {
 	// pgtype.Text/Int4's own zero value is "" / 0 when !Valid, exactly the
 	// "unset" wire value this DTO wants - no helper needed.
-	return inboundDetailDTO{
+	dto := inboundDetailDTO{
 		Tag: in.Tag, Protocol: in.Protocol, Network: in.Network, HeaderType: in.HeaderType.String,
 		Security:               in.Security,
 		RealityPrivateKey:      in.RealityPrivateKey.String,
@@ -200,7 +215,14 @@ func toInboundDetailDTO(in generated.Inbound) inboundDetailDTO {
 		ShadowTLSInnerMethod:   in.ShadowtlsInnerMethod.String,
 		ShadowTLSInnerPassword: in.ShadowtlsInnerPassword.String,
 		MtprotoTlsDomain:       in.MtprotoTlsDomain.String,
+		WgServerPrivateKey:     in.WgServerPrivateKey.String,
+		WgServerPublicKey:      wireguardPublicKey(in.WgServerPrivateKey.String),
+		WgSubnet:               in.WgSubnet.String,
 	}
+	if in.WgMtu.Valid {
+		dto.WgMtu = &in.WgMtu.Int32
+	}
+	return dto
 }
 
 // handleListInboundsDetailed implements GET /api/inbounds/detail (sudo
@@ -322,6 +344,13 @@ type inboundSyncEntry struct {
 
 	// See inboundDetailDTO's own doc comment on this field.
 	MtprotoTlsDomain string `json:"mtproto_tls_domain,omitempty"`
+
+	// See inboundDetailDTO's own doc comment on these fields (the sync
+	// entry takes the private key and derives nothing - the public key
+	// is a read-side artifact only).
+	WgServerPrivateKey string `json:"wg_server_private_key,omitempty"`
+	WgSubnet           string `json:"wg_subnet,omitempty"`
+	WgMtu              *int32 `json:"wg_mtu,omitempty"`
 }
 
 // syncInboundEntries is the real work behind POST /api/inbounds/sync:
@@ -376,6 +405,9 @@ func (h *Handler) syncInboundEntries(ctx context.Context, entries []inboundSyncE
 			ShadowtlsInnerMethod:   textFromPtr(normalizeZeroString(&e.ShadowTLSInnerMethod)),
 			ShadowtlsInnerPassword: textFromPtr(normalizeZeroString(&e.ShadowTLSInnerPassword)),
 			MtprotoTlsDomain:       textFromPtr(normalizeZeroString(&e.MtprotoTlsDomain)),
+			WgServerPrivateKey:     textFromPtr(normalizeZeroString(&e.WgServerPrivateKey)),
+			WgSubnet:               textFromPtr(normalizeZeroString(&e.WgSubnet)),
+			WgMtu:                  pgInt4FromPtr(e.WgMtu),
 		})
 		if err != nil {
 			return created, fmt.Errorf("could not sync inbound %s: %w", e.Tag, err)
@@ -513,8 +545,75 @@ func validateInboundEntries(entries []inboundSyncEntry) error {
 				}
 			}
 		}
+		if e.Protocol == "wireguard" {
+			// WireGuard IS the encryption - a TLS/security column on
+			// top of it is meaningless, and the userspace device is
+			// UDP-only. One inbound is also one subnet (the tunnel
+			// IP is derived per user from users.id, see
+			// internal/nodecore/wg's own doc comment), so a
+			// multi-port entry - which the node builder would fan
+			// out into one listener per port - is a subnet fork it
+			// cannot serve: exactly one listen port.
+			if e.Security != "" && e.Security != "none" {
+				return &inboundValidationError{"inbound " + e.Tag + ": security must be \"none\" for protocol wireguard"}
+			}
+			if e.WgServerPrivateKey != "" {
+				raw, err := base64.StdEncoding.DecodeString(e.WgServerPrivateKey)
+				if err != nil || len(raw) != 32 {
+					return &inboundValidationError{"inbound " + e.Tag + ": wg_server_private_key must be base64 of 32 bytes"}
+				}
+			}
+			if e.WgSubnet != "" {
+				if problem := wireguardSubnetProblem(e.WgSubnet); problem != "" {
+					return &inboundValidationError{"inbound " + e.Tag + ": " + problem}
+				}
+			}
+			if e.WgMtu != nil && (*e.WgMtu < 1200 || *e.WgMtu > 1500) {
+				return &inboundValidationError{"inbound " + e.Tag + ": wg_mtu must be 1200-1500"}
+			}
+		}
 	}
 	return nil
+}
+
+// wireguardSubnetProblem says why a wg_subnet value cannot be served, or
+// "": IPv4 only, /16-/24 (the vpn-ui window - a /15 wastes a tenth of
+// RFC1918, a /25+ cannot hold a real user base), and the canonical masked
+// form (10.7.0.1/24 is 10.7.0.0/24).
+func wireguardSubnetProblem(subnet string) string {
+	prefix, err := netip.ParsePrefix(subnet)
+	if err != nil {
+		return "wg_subnet must be an IPv4 CIDR like 10.7.0.0/24"
+	}
+	if !prefix.Addr().Is4() {
+		return "wg_subnet must be IPv4"
+	}
+	if prefix.Bits() < 16 || prefix.Bits() > 24 {
+		return "wg_subnet must be between /16 and /24"
+	}
+	if prefix.String() != prefix.Masked().String() {
+		return "wg_subnet must be the network address (" + prefix.Masked().String() + ")"
+	}
+	return ""
+}
+
+// wireguardPublicKey derives the endpoint public key a client's conf
+// needs from the stored private key - base64 std in, base64 std out, ""
+// when the private key is absent or malformed (the DTO treats that as
+// "not set", never an error).
+func wireguardPublicKey(privateKeyB64 string) string {
+	if privateKeyB64 == "" {
+		return ""
+	}
+	priv, err := base64.StdEncoding.DecodeString(privateKeyB64)
+	if err != nil || len(priv) != 32 {
+		return ""
+	}
+	pub, err := curve25519.X25519(priv, curve25519.Basepoint)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(pub)
 }
 
 // mtprotoTlsDomainProblem says why a mtproto_tls_domain value cannot be
@@ -667,6 +766,27 @@ func (h *Handler) handleCreateInbound(c *gin.Context) {
 		// domain without knowing what the field means.
 		e.MtprotoTlsDomain = "www.google.com"
 	}
+	if e.Protocol == "wireguard" {
+		// Same one-click spirit: an inbound created without a server
+		// key gets a fresh Curve25519 pair minted here (the form's
+		// generator is the client-side path; the server mints for
+		// every other client too), and an empty subnet means the
+		// 10.7.0.0/24 default rather than a required field.
+		if e.WgServerPrivateKey == "" {
+			priv := make([]byte, 32)
+			if _, err := rand.Read(priv); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"detail": "could not generate wireguard key"})
+				return
+			}
+			priv[0] &= 248
+			priv[31] &= 127
+			priv[31] |= 64
+			e.WgServerPrivateKey = base64.StdEncoding.EncodeToString(priv)
+		}
+		if e.WgSubnet == "" {
+			e.WgSubnet = "10.7.0.0/24"
+		}
+	}
 
 	if _, err := h.syncInboundEntries(ctx, []inboundSyncEntry{e}); err != nil {
 		var verr *inboundValidationError
@@ -739,7 +859,7 @@ func realityPortToPg(port int32) pgtype.Int4 {
 
 func proxyTypeValid(protocol string) bool {
 	switch protocol {
-	case "vmess", "vless", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn", "mtproto":
+	case "vmess", "vless", "trojan", "shadowsocks", "hysteria2", "tuic", "snell", "anytls", "hysteria", "naive", "shadowtls", "sshvpn", "mtproto", "wireguard":
 		return true
 	}
 	return false

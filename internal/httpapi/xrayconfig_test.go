@@ -181,7 +181,13 @@ func TestUpdateXrayConfigRejectsUnknownProtocol(t *testing.T) {
 func TestInboundSyncEntryFromDetailCarriesEverySetting(t *testing.T) {
 	var in inboundDetailDTO
 	v := reflect.ValueOf(&in).Elem()
+	// WgServerPublicKey is derived on read, never a stored setting - the
+	// sync entry correctly has no field for it.
+	skip := map[string]bool{"WgServerPublicKey": true}
 	for i := 0; i < v.NumField(); i++ {
+		if skip[v.Type().Field(i).Name] {
+			continue
+		}
 		f := v.Field(i)
 		switch f.Kind() {
 		case reflect.String:
@@ -192,6 +198,14 @@ func TestInboundSyncEntryFromDetailCarriesEverySetting(t *testing.T) {
 			f.SetBool(true)
 		case reflect.Slice:
 			f.Set(reflect.ValueOf([]string{v.Type().Field(i).Name}))
+		case reflect.Ptr:
+			kind := f.Type().Elem().Kind()
+			if kind == reflect.Int32 {
+				n := int32(i + 1)
+				f.Set(reflect.ValueOf(&n))
+			} else {
+				t.Fatalf("field %s: add a test value for ptr-to-%s", v.Type().Field(i).Name, kind)
+			}
 		default:
 			t.Fatalf("field %s: add a test value for kind %s", v.Type().Field(i).Name, f.Kind())
 		}
@@ -200,6 +214,9 @@ func TestInboundSyncEntryFromDetailCarriesEverySetting(t *testing.T) {
 	out := reflect.ValueOf(inboundSyncEntryFromDetail(in))
 	for i := 0; i < v.NumField(); i++ {
 		name := v.Type().Field(i).Name
+		if skip[name] {
+			continue
+		}
 		got := out.FieldByName(name)
 		if !got.IsValid() {
 			t.Errorf("inboundSyncEntry has no field for the document's %s", name)

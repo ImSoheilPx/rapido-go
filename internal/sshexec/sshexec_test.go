@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -167,7 +168,14 @@ func serveOneSSHConn(t *testing.T, nc net.Conn, cfg *ssh.ServerConfig) {
 				if runtime.GOOS == "windows" {
 					// The test exercises POSIX heredoc scripts. Windows runners do
 					// not ship sh on PATH, but Git for Windows provides a real bash.
+					// rapido: Program Files is only where a system-wide install
+					// lives; this dev box (and CI windows runners that use a
+					// portable git) keep it under the Hermes tools dir, and
+					// PATH-based lookup finds either bash wherever it is.
 					shell = `C:\Program Files\Git\bin\bash.exe`
+					if _, err := os.Stat(shell); err != nil {
+						shell = "bash"
+					}
 				}
 				cmd := exec.Command(shell, flag, payload.Command)
 				cmd.Stdout = ch

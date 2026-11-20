@@ -435,7 +435,8 @@ func (h *Handler) forEachUserHost(ctx context.Context, user generated.User, fn f
 			SnellPSK: ph.host.SnellPSK, SnellV6Mode: ph.host.SnellV6Mode,
 			HysteriaObfsPassword: ph.host.HysteriaObfsPassword,
 			ShadowTLSInnerMethod: ph.host.ShadowTLSInnerMethod, ShadowTLSInnerPassword: ph.host.ShadowTLSInnerPassword,
-			MtprotoTlsDomain: ph.host.MtprotoTlsDomain,
+			MtprotoTlsDomain:  ph.host.MtprotoTlsDomain,
+			WgServerPublicKey: ph.host.WgServerPublicKey, WgSubnet: ph.host.WgSubnet, WgMtu: ph.host.WgMtu,
 		}
 		fn(ph.host.Protocol, settings, remark, address, eff)
 	}
@@ -449,7 +450,7 @@ func (h *Handler) forEachUserHost(ctx context.Context, user generated.User, fn f
 func (h *Handler) buildUserLinks(ctx context.Context, user generated.User) ([]string, error) {
 	var links []string
 	err := h.forEachUserHost(ctx, user, func(protocol string, settings proxysettings.Settings, remark, address string, eff subscription.EffectiveInbound) {
-		link, err := subscription.BuildLink(remark, address, eff, settings, user.Username)
+		link, err := subscription.BuildLinkWithUser(remark, address, eff, settings, int64(user.ID))
 		if err == nil {
 			links = append(links, link)
 		}
@@ -474,6 +475,13 @@ func (h *Handler) buildUserClashConfig(ctx context.Context, user generated.User,
 		node, err := subscription.ClashProxy(remark, address, eff, settings, isMeta)
 		if err == nil && node != nil {
 			proxies = append(proxies, node)
+		}
+		// Wireguard's meta entry needs the user's derived tunnel
+		// address, so it is built beside ClashProxy, not inside it.
+		if err == nil && node == nil && settings.Type == proxysettings.Wireguard {
+			if wgNode := subscription.ClashWireguardProxy(remark, address, eff, settings.Wireguard, int64(user.ID), isMeta); wgNode != nil {
+				proxies = append(proxies, wgNode)
+			}
 		}
 	})
 	if err != nil {

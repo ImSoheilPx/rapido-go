@@ -52,6 +52,13 @@ func V2rayJSONConfig(remark, address string, in EffectiveInbound, settings proxy
 		return nil, nil
 	}
 
+	// WireGuard has no V2Ray/Xray outbound either (Xray-core has no
+	// wireguard transport; the wireguard:// link and RenderWgConf are
+	// this protocol's consumption paths).
+	if settings.Type == proxysettings.Wireguard {
+		return nil, nil
+	}
+
 	var vlessFlowSet bool
 	outbound := map[string]any{"tag": "proxy", "protocol": string(settings.Type)}
 	switch settings.Type {

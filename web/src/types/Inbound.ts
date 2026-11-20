@@ -45,6 +45,7 @@ export const INBOUND_PROTOCOLS = [
   "shadowtls",
   "sshvpn",
   "mtproto",
+  "wireguard",
 ] as const;
 export const TLS_REQUIRED_PROTOCOLS = ["hysteria2", "tuic", "anytls", "hysteria"] as const;
 export const SNELL_V6_MODES = ["default", "unshaped", "unsafe-raw"] as const;
@@ -86,6 +87,9 @@ export type Inbound = {
   shadowtls_inner_method?: string;
   shadowtls_inner_password?: string;
   mtproto_tls_domain?: string;
+  wg_server_private_key?: string;
+  wg_subnet?: string;
+  wg_mtu?: number;
 };
 
 // POST /api/inbounds/sync's per-entry shape (internal/httpapi/inbounds.go's
@@ -115,6 +119,9 @@ export type InboundSyncEntry = {
   shadowtls_inner_method?: string;
   shadowtls_inner_password?: string;
   mtproto_tls_domain?: string;
+  wg_server_private_key?: string;
+  wg_subnet?: string;
+  wg_mtu?: number;
 };
 
 // POST /api/inbounds's body - InboundSyncEntry plus the one extra field

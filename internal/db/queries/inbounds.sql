@@ -10,8 +10,9 @@ INSERT INTO inbounds (
     tls_certificate, tls_key, tls_server_name,
     hysteria2_obfs_password, up_mbps, down_mbps, congestion_control, zero_rtt_handshake,
     snell_psk, snell_v6_mode, hysteria_obfs_password,
-    shadowtls_inner_method, shadowtls_inner_password, mtproto_tls_domain
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+    shadowtls_inner_method, shadowtls_inner_password, mtproto_tls_domain,
+    wg_server_private_key, wg_subnet, wg_mtu
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
 ON CONFLICT (tag) DO UPDATE SET
     protocol = EXCLUDED.protocol,
     network = EXCLUDED.network,
@@ -34,7 +35,10 @@ ON CONFLICT (tag) DO UPDATE SET
     hysteria_obfs_password = EXCLUDED.hysteria_obfs_password,
     shadowtls_inner_method = EXCLUDED.shadowtls_inner_method,
     shadowtls_inner_password = EXCLUDED.shadowtls_inner_password,
-    mtproto_tls_domain = EXCLUDED.mtproto_tls_domain
+    mtproto_tls_domain = EXCLUDED.mtproto_tls_domain,
+    wg_server_private_key = EXCLUDED.wg_server_private_key,
+    wg_subnet = EXCLUDED.wg_subnet,
+    wg_mtu = EXCLUDED.wg_mtu
 RETURNING *, (xmax = 0) AS inserted;
 
 -- name: GetInboundByTag :one

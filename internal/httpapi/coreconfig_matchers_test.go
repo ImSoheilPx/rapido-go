@@ -110,7 +110,7 @@ func TestParseNodeConfigSchema(t *testing.T) {
 		"3":    {compact: true, delta: true},
 		"4":    {compact: true, delta: true, extendedRules: true},
 		"5":    {compact: true, delta: true, extendedRules: true, streamOutbounds: true},
-		"6":    {compact: true, delta: true, extendedRules: true, streamOutbounds: true},
+		"6":    {compact: true, delta: true, extendedRules: true, streamOutbounds: true, newProtocols: true},
 	}
 	for raw, want := range cases {
 		if got := parseNodeConfigSchema(raw); got != want {

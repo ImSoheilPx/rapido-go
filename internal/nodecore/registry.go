@@ -37,17 +37,18 @@ import (
 	forkedanytls "github.com/legendary1205/rapido-go/internal/nodecore/anytls"
 	forkedhysteria "github.com/legendary1205/rapido-go/internal/nodecore/hysteria"
 	forkedhysteria2 "github.com/legendary1205/rapido-go/internal/nodecore/hysteria2"
+	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
 	forkednaive "github.com/legendary1205/rapido-go/internal/nodecore/naive"
 	forkedshadowsocks "github.com/legendary1205/rapido-go/internal/nodecore/shadowsocks"
 	forkedshadowtls "github.com/legendary1205/rapido-go/internal/nodecore/shadowtls"
-	forkedmtproto "github.com/legendary1205/rapido-go/internal/nodecore/mtproto"
-	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	forkedsnell "github.com/legendary1205/rapido-go/internal/nodecore/snell"
 	"github.com/legendary1205/rapido-go/internal/nodecore/spread"
+	forkedsshvpn "github.com/legendary1205/rapido-go/internal/nodecore/sshvpn"
 	forkedtrojan "github.com/legendary1205/rapido-go/internal/nodecore/trojan"
 	forkedtuic "github.com/legendary1205/rapido-go/internal/nodecore/tuic"
 	forkedvless "github.com/legendary1205/rapido-go/internal/nodecore/vless"
 	forkedvmess "github.com/legendary1205/rapido-go/internal/nodecore/vmess"
+	forkedwg "github.com/legendary1205/rapido-go/internal/nodecore/wg"
 )
 
 // InboundRegistry registers only the protocols Rapido actually serves, all
@@ -72,6 +73,7 @@ func InboundRegistry() *inbound.Registry {
 	forkedshadowtls.RegisterInbound(registry)
 	forkedsshvpn.RegisterInbound(registry)
 	forkedmtproto.RegisterInbound(registry)
+	forkedwg.RegisterInbound(registry)
 	return registry
 }
 

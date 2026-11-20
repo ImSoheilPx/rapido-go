@@ -197,7 +197,9 @@ func TestFromWireStillRejectsNonEmptyArray(t *testing.T) {
 }
 
 func TestFromWireRejectsUnknownType(t *testing.T) {
-	if _, err := FromWire("wireguard", nil); err == nil {
+	// ("wireguard" was the placeholder here before the protocol existed;
+	// amnezia is the next unknown type off the plan.)
+	if _, err := FromWire("amnezia", nil); err == nil {
 		t.Error("FromWire with an unknown proxy type succeeded, want an error")
 	}
 }

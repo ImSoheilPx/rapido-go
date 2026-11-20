@@ -22,6 +22,20 @@ export const generateSs2022Key = (bytes: number): string => base64(randomBytes(b
 
 /** Reality's X25519 key pair, in the unpadded base64url form sing-box reads. Null where the
  * browser has no X25519 or no secure context, which the form reports instead of guessing. */
+/** WireGuard's X25519 key pair, standard base64 of 32 bytes each - the exact
+ * shape `wg genkey`/`wg pubkey` produce and this panel's Go side mints. Null
+ * where the browser has no X25519 (same fallback as Reality's generator). */
+export const generateWgKeyPair = async (): Promise<{ privateKey: string; publicKey: string } | null> => {
+  try {
+    const pair = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+    const raw = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
+    return { privateKey: base64(pkcs8.slice(-32)), publicKey: base64(raw) };
+  } catch {
+    return null;
+  }
+};
+
 export const generateRealityKeyPair = async (): Promise<{ privateKey: string; publicKey: string } | null> => {
   try {
     const pair = (await crypto.subtle.generateKey({ name: "X25519" }, true, ["deriveBits"])) as CryptoKeyPair;

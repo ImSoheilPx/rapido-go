@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"sort"
 	"strings"
@@ -47,6 +48,11 @@ func BuildLink(remark, address string, in EffectiveInbound, settings proxysettin
 		return sshvpnLink(remark, address, in, settings.SSHVPN, username), nil
 	case proxysettings.MTProto:
 		return mtprotoLink(remark, address, in, settings.MTProto), nil
+	case proxysettings.Wireguard:
+		// TunnelIndex is resolved by the caller via WireguardTunnelIndex
+		// (see BuildLinkWithUser below); plain BuildLink has no user row
+		// and cannot know the address.
+		return "", fmt.Errorf("subscription: wireguard links need the user row (use BuildLinkWithUser)")
 	default:
 		return "", fmt.Errorf("subscription: unknown proxy type %q", settings.Type)
 	}
@@ -250,6 +256,36 @@ func mtprotoLink(remark, address string, in EffectiveInbound, s *proxysettings.M
 		encodeURIComponentGo(address), in.Port, encodeURIComponentGo(secret), url.PathEscape(remark))
 }
 
+// wireguardLink builds the wireguard:// share link. There is no single
+// RFC'd wireguard URI scheme the way ss:///vmess:// have; this is the
+// de-facto shape v2rayN/NekoBox exchanges (and what this panel's own
+// docs will pin): the USER's keypair in the userinfo (private key - a
+// wireguard peer's private key is the whole credential; base64 std both
+// sides), server public key, the user's derived tunnel IP and the
+// inbound's subnet/MTU as query params. TunnelIP is the one value that
+// is NOT in the credential row - it is derived per-inbound from the
+// user's numeric id against WgSubnet (see internal/nodecore/wg's
+// AddrForIndex) - so the caller (forEachUserHost's closure, which has
+// the users row in hand) passes it in; 0 means "caller could not", and
+// the link omits the param rather than lying with a wrong address.
+func wireguardLink(remark, address string, in EffectiveInbound, s *proxysettings.WireguardSettings, tunnelIndex uint32) (string, error) {
+	q := url.Values{}
+	q.Set("pbk", in.WgServerPublicKey)
+	if s.PresharedKey != "" {
+		q.Set("psk", s.PresharedKey)
+	}
+	if tunnelIndex > 0 {
+		if prefix, err := netip.ParsePrefix(in.WgSubnet); err == nil {
+			q.Set("tunnel-ip", AddrForIndex(prefix, tunnelIndex).String())
+		}
+	}
+	if in.WgMtu > 0 && in.WgMtu != 1408 {
+		q.Set("mtu", fmt.Sprintf("%d", in.WgMtu))
+	}
+	userinfo := url.UserPassword(s.PrivateKey, s.PublicKey).String()
+	return fmt.Sprintf("wireguard://%s@%s:%d?%s#%s", userinfo, address, in.Port, q.Encode(), url.PathEscape(remark)), nil
+}
+
 // encodeURIComponentGo is a byte-for-byte clone of JavaScript's
 // encodeURIComponent: every byte outside the keep-set
 // A-Za-z0-9-_.!~*'() is percent-encoded. url.QueryEscape is NOT a
@@ -272,6 +308,7 @@ func encodeURIComponentGo(s string) string {
 	}
 	return b.String()
 }
+
 // naiveLink builds the naive-proxy project's own documented share-link
 // format (naive+https://user:pass@host:port?padding=true) - unlike every
 // other link in this file, security here is genuinely optional (naive can
@@ -328,4 +365,26 @@ func sortedMap(m map[string]any) json.RawMessage {
 	}
 	b.WriteByte('}')
 	return json.RawMessage(b.String())
+}
+
+// AddrForIndex derives user index's tunnel IP inside subnet - the same
+// arithmetic internal/nodecore/wg.AddrForIndex does (subnet.Addr() |
+// index), restated because subscription must not import nodecore. One
+// derivation, three consumers: links, wg-conf, and the node's allowed_ip.
+func AddrForIndex(subnet netip.Prefix, index uint32) netip.Addr {
+	base := subnet.Addr().As4()
+	base[3] |= byte(index)
+	base[2] |= byte(index >> 8)
+	return netip.AddrFrom4(base)
+}
+
+// BuildLinkWithUser is BuildLink for the one protocol whose link needs
+// the user's own database row: wireguard's tunnel IP is derived from
+// users.id (stable, unique), which no EffectiveInbound carries. Every
+// other type falls straight through to BuildLink.
+func BuildLinkWithUser(remark, address string, in EffectiveInbound, settings proxysettings.Settings, userID int64) (string, error) {
+	if settings.Type == proxysettings.Wireguard {
+		return wireguardLink(remark, address, in, settings.Wireguard, uint32(userID))
+	}
+	return BuildLink(remark, address, in, settings, "")
 }

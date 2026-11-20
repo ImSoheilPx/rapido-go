@@ -1533,5 +1533,7 @@
   "rapido.coreForm.link.error.method": "The shadowsocks method {{value}} isn't supported.",
   "rapido.coreForm.link.error.plugin": "Shadowsocks plugins ({{value}}) aren't supported.",
   "rapido.coreForm.link.error.obfs": "Hysteria2 obfuscation ({{value}}) isn't supported on outbounds.",
-  "rapido.coreForm.link.error.pin": "A pinned certificate (pinSHA256) isn't supported on outbounds."
+  "rapido.coreForm.link.error.pin": "A pinned certificate (pinSHA256) isn't supported on outbounds.",
+  "rapido.coreForm.hint.wgKey": "The endpoint's own key. Leave empty and the server generates one on create.",
+  "rapido.coreForm.hint.wgSubnet": "IPv4 /16 to /24. Every user gets one address of it, derived from their account."
 }

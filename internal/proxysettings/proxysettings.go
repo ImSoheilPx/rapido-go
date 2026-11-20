@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/crypto/curve25519"
 	"slices"
 	"unicode"
 	"unicode/utf8"
@@ -33,11 +34,12 @@ const (
 	ShadowTLS   ProxyType = "shadowtls"
 	SSHVPN      ProxyType = "sshvpn"
 	MTProto     ProxyType = "mtproto"
+	Wireguard   ProxyType = "wireguard"
 )
 
 func (t ProxyType) Valid() bool {
 	switch t {
-	case VMess, VLESS, Trojan, Shadowsocks, Hysteria2, TUIC, Snell, AnyTLS, Hysteria, Naive, ShadowTLS, SSHVPN, MTProto:
+	case VMess, VLESS, Trojan, Shadowsocks, Hysteria2, TUIC, Snell, AnyTLS, Hysteria, Naive, ShadowTLS, SSHVPN, MTProto, Wireguard:
 		return true
 	}
 	return false
@@ -80,6 +82,7 @@ type Settings struct {
 	ShadowTLS   *ShadowTLSSettings
 	SSHVPN      *SSHVPNSettings
 	MTProto     *MTProtoSettings
+	Wireguard   *WireguardSettings
 }
 
 type VMessSettings struct {
@@ -172,6 +175,80 @@ type SSHVPNSettings struct {
 // speaks hex secrets.
 type MTProtoSettings struct {
 	Secret string `json:"secret"`
+}
+
+// WireguardSettings is the wireguard user's whole credential: a
+// Curve25519 keypair. PrivateKey is the secret half (base64 std, 32
+// bytes); PublicKey is derived from it - stored alongside for cheap
+// listing because deriving X25519 publics on every config build costs
+// a curve op per user, but ALWAYS validated to actually match (below),
+// so a stale/foreign public key can never masquerade as the peer
+// identity. PresharedKey is optional post-quantum hardening (base64
+// std, 32 bytes); when present the peer and the server conf both must
+// carry it. All-or-none: a row with only some of the keypair fields is
+// refused, not silently half-applied.
+type WireguardSettings struct {
+	PrivateKey   string `json:"private_key"`
+	PublicKey    string `json:"public_key"`
+	PresharedKey string `json:"preshared_key,omitempty"`
+}
+
+// wireguardKeyBytes decodes one base64-std 32-byte key field.
+func wireguardKeyBytes(name, value string) ([]byte, error) {
+	raw, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || len(raw) != 32 {
+		return nil, fmt.Errorf("invalid wireguard %s: must be base64 of 32 bytes", name)
+	}
+	return raw, nil
+}
+
+// checkWireguardKeypair validates the all-or-none shape: private and
+// public both present and genuinely paired (X25519(priv, basepoint) ==
+// pub), preshared either absent or a valid 32-byte key.
+func checkWireguardKeypair(s *WireguardSettings) error {
+	if s.PrivateKey == "" && s.PublicKey == "" && s.PresharedKey == "" {
+		return fmt.Errorf("invalid wireguard settings: keypair is empty")
+	}
+	if s.PrivateKey == "" || s.PublicKey == "" {
+		return fmt.Errorf("invalid wireguard settings: private_key and public_key are both required")
+	}
+	priv, err := wireguardKeyBytes("private_key", s.PrivateKey)
+	if err != nil {
+		return err
+	}
+	pub, err := wireguardKeyBytes("public_key", s.PublicKey)
+	if err != nil {
+		return err
+	}
+	derived, err := curve25519.X25519(priv, curve25519.Basepoint)
+	if err != nil {
+		return fmt.Errorf("invalid wireguard private_key: %w", err)
+	}
+	if !bytes.Equal(derived, pub) {
+		return fmt.Errorf("invalid wireguard settings: public_key does not match private_key")
+	}
+	if s.PresharedKey != "" {
+		if _, err := wireguardKeyBytes("preshared_key", s.PresharedKey); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// newWireguardKeypair mints a fresh Curve25519 pair, base64 std.
+func newWireguardKeypair() (privateKey, publicKey string) {
+	priv := make([]byte, 32)
+	if _, err := rand.Read(priv); err != nil {
+		panic(err) // crypto/rand failing means the OS entropy source is broken
+	}
+	priv[0] &= 248
+	priv[31] &= 127
+	priv[31] |= 64
+	pub, err := curve25519.X25519(priv, curve25519.Basepoint)
+	if err != nil {
+		panic(err) // X25519 over clamped scalars cannot fail
+	}
+	return base64.StdEncoding.EncodeToString(priv), base64.StdEncoding.EncodeToString(pub)
 }
 
 // randomHexSecret mints n random bytes as 2n lowercase hex chars.
@@ -353,6 +430,8 @@ func (s Settings) Validate() error {
 		return checkSecret("sshvpn", s.SSHVPN.Password)
 	case MTProto:
 		return checkMtprotoSecret(s.MTProto.Secret)
+	case Wireguard:
+		return checkWireguardKeypair(s.Wireguard)
 	}
 	return fmt.Errorf("proxysettings: unknown proxy type %q", s.Type)
 }
@@ -393,6 +472,8 @@ func (s Settings) Credential() (field, value string) {
 		return "password", s.SSHVPN.Password
 	case MTProto:
 		return "secret", s.MTProto.Secret
+	case Wireguard:
+		return "public_key", s.Wireguard.PublicKey
 	}
 	return "", ""
 }
@@ -573,6 +654,19 @@ func parse(proxyType ProxyType, raw json.RawMessage, coerceVisionFlow bool) (Set
 		}
 		return Settings{Type: MTProto, MTProto: &s}, nil
 
+	case Wireguard:
+		var s WireguardSettings
+		if hasSettings(raw) {
+			if err := json.Unmarshal(raw, &s); err != nil {
+				return Settings{}, fmt.Errorf("proxysettings: invalid wireguard settings: %w", err)
+			}
+		}
+		if s.PrivateKey == "" && s.PublicKey == "" {
+			s.PrivateKey, s.PublicKey = newWireguardKeypair()
+			s.PresharedKey = ""
+		}
+		return Settings{Type: Wireguard, Wireguard: &s}, nil
+
 	default:
 		return Settings{}, fmt.Errorf("proxysettings: unknown proxy type %q", proxyType)
 	}
@@ -622,6 +716,8 @@ func (s Settings) MarshalJSON() ([]byte, error) {
 		return json.Marshal(s.SSHVPN)
 	case MTProto:
 		return json.Marshal(s.MTProto)
+	case Wireguard:
+		return json.Marshal(s.Wireguard)
 	default:
 		return nil, fmt.Errorf("proxysettings: unknown proxy type %q", s.Type)
 	}
@@ -659,5 +755,8 @@ func (s *Settings) Revoke() {
 		s.SSHVPN.Password = randomPassword()
 	case MTProto:
 		s.MTProto.Secret = randomHexSecret(mtgSecretKeyLength)
+	case Wireguard:
+		s.Wireguard.PrivateKey, s.Wireguard.PublicKey = newWireguardKeypair()
+		s.Wireguard.PresharedKey = ""
 	}
 }

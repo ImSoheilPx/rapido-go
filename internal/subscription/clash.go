@@ -3,6 +3,7 @@ package subscription
 import (
 	_ "embed"
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"github.com/goccy/go-yaml"
@@ -81,6 +82,9 @@ func ClashProxy(remark, address string, in EffectiveInbound, settings proxysetti
 	if settings.Type == proxysettings.MTProto {
 		return nil, nil
 	}
+	// WireGuard is meta-only and needs the user's derived tunnel
+	// address, which this function's signature has nowhere to take:
+	// ClashWireguardProxy (below) builds it.
 
 	node := map[string]any{
 		"name": remark, "server": address, "port": in.Port, "udp": true,
@@ -416,4 +420,39 @@ func UniqueName(name string, taken map[string]bool) string {
 			return candidate
 		}
 	}
+}
+
+// ClashWireguardProxy builds the Clash Meta (mihomo) wireguard proxy
+// entry - meta-only, because plain Clash has no wireguard type at all.
+// Returns nil for non-meta, matching ClashProxy's own convention of
+// silent exclusion over an error. userID drives the derived tunnel
+// address (AddrForIndex against the inbound's WgSubnet), the same
+// derivation links and wg-conf use.
+func ClashWireguardProxy(remark, address string, in EffectiveInbound, s *proxysettings.WireguardSettings, userID int64, isMeta bool) map[string]any {
+	if !isMeta {
+		return nil
+	}
+	subnet, err := netip.ParsePrefix(in.WgSubnet)
+	if err != nil {
+		return nil
+	}
+	node := map[string]any{
+		"name":          remark,
+		"type":          "wireguard",
+		"server":        address,
+		"port":          in.Port,
+		"udp":           true,
+		"ip":            AddrForIndex(subnet, uint32(userID)).String(),
+		"public-key":    in.WgServerPublicKey,
+		"private-key":   s.PrivateKey,
+		"mtu":           int(in.WgMtu),
+		"allowed-ips":   []string{"0.0.0.0/0", "::/0"},
+		"keepalive":     25,
+		"dns":           []string{AddrForIndex(subnet, 1).String()},
+		"full-cone-nat": true,
+	}
+	if s.PresharedKey != "" {
+		node["preshared-key"] = s.PresharedKey
+	}
+	return node
 }

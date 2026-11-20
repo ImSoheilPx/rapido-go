@@ -6,6 +6,7 @@ import { FieldSpec, splitList } from "utils/coreConfigFields";
 import {
   generatePassword,
   generateRealityKeyPair,
+  generateWgKeyPair,
   generateShortId,
   generateSnellPsk,
   generateSs2022Key,
@@ -352,6 +353,14 @@ export const ItemForm: FC<ItemFormProps> = ({
           set(spec.key, pair.privateKey);
           setRealityPublic(pair.publicKey);
         }
+        break;
+      }
+      case "wgKey": {
+        // Server-fallback: leaving the field empty lets the server mint a
+        // pair on create (inbounds.go's handleCreateInbound), so a failed
+        // generation is not an error - the key is simply left blank.
+        const pair = await generateWgKeyPair();
+        if (pair) set(spec.key, pair.privateKey);
         break;
       }
     }

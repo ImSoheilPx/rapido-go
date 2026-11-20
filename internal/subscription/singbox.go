@@ -35,6 +35,14 @@ func SingBoxOutbound(tag, address string, in EffectiveInbound, settings proxyset
 		return nil, nil, nil
 	}
 
+	// WireGuard as a PROXY is deliberately not emitted here: sing-box's
+	// wireguard outbound is an ENDPOINT (a whole tunnel interface with
+	// its own routing table), which cannot be spliced into a
+	// subscription document's outbounds array the way a stream proxy
+	// can - emitting one would produce a config sing-box refuses to
+	// load. The wireguard:// link (BuildLinkWithUser) and the wg-quick
+	// artifact (RenderWgConf) are this protocol's consumption paths.
+
 	out := map[string]any{
 		"type": string(settings.Type), "tag": tag, "server": address, "server_port": in.Port,
 	}

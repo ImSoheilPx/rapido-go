@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/crypto/curve25519"
 
 	"github.com/legendary1205/rapido-go/internal/db/generated"
 )
@@ -89,6 +90,17 @@ type EffectiveInbound struct {
 	// panel default www.google.com (mtprotoLink applies it). See
 	// internal/nodecore/mtproto's own doc comment.
 	MtprotoTlsDomain string `json:"mtproto_tls_domain"`
+
+	// The wireguard inbound's device parameters - WgServerPublicKey is
+	// the DERIVED public key (BuildEffectiveInbound computes it from
+	// the inbound's stored private key, exactly the way
+	// RealityPublicKey is derived; the private key never reaches
+	// subscription artifacts). WgSubnet/WgMtu fall back to the node
+	// defaults here so a link always carries the real values a client
+	// will negotiate.
+	WgServerPublicKey string `json:"wg_server_public_key,omitempty"`
+	WgSubnet          string `json:"wg_subnet,omitempty"`
+	WgMtu             uint32 `json:"wg_mtu,omitempty"`
 }
 
 // dialsOwnCertificate reports whether a host reaches, by bare address, an inbound
@@ -111,6 +123,26 @@ func dialsOwnCertificate(inbound generated.Inbound, host generated.Host, securit
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	return err == nil && bytes.Equal(cert.RawIssuer, cert.RawSubject)
+}
+
+// wireguardPublicKeyOf derives a wireguard endpoint's public key from its
+// stored private key (base64 std in/out, "" when unset or malformed) -
+// the same derivation httpapi.wireguardPublicKey does; duplicated here
+// because internal/subscription deliberately imports neither httpapi nor
+// proxysettings' curve code (this package is link-artifact-only).
+func wireguardPublicKeyOf(privateKeyB64 string) string {
+	if privateKeyB64 == "" {
+		return ""
+	}
+	priv, err := base64.StdEncoding.DecodeString(privateKeyB64)
+	if err != nil || len(priv) != 32 {
+		return ""
+	}
+	pub, err := curve25519.X25519(priv, curve25519.Basepoint)
+	if err != nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(pub)
 }
 
 // BuildEffectiveInbound merges one Host row onto its parent Inbound row.
@@ -159,7 +191,19 @@ func BuildEffectiveInbound(inbound generated.Inbound, host generated.Host) Effec
 		HysteriaObfsPassword:   inbound.HysteriaObfsPassword.String,
 		ShadowTLSInnerMethod:   inbound.ShadowtlsInnerMethod.String,
 		ShadowTLSInnerPassword: inbound.ShadowtlsInnerPassword.String,
-		MtprotoTlsDomain:      inbound.MtprotoTlsDomain.String,
+		MtprotoTlsDomain:       inbound.MtprotoTlsDomain.String,
+	}
+	if inbound.Protocol == "wireguard" {
+		e.WgServerPublicKey = wireguardPublicKeyOf(inbound.WgServerPrivateKey.String)
+		e.WgSubnet = inbound.WgSubnet.String
+		if e.WgSubnet == "" {
+			e.WgSubnet = "10.7.0.0/24"
+		}
+		if inbound.WgMtu.Valid {
+			e.WgMtu = uint32(inbound.WgMtu.Int32)
+		} else {
+			e.WgMtu = 1408
+		}
 	}
 	if security == "reality" {
 		e.RealityPublicKey = derivePublicKey(inbound.RealityPrivateKey.String)

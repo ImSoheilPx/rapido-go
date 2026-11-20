@@ -322,7 +322,14 @@ func (w *stackDevice) Write(bufs [][]byte, offset int) (count int, err error) {
 		packetBuffer := stack.NewPacketBuffer(stack.PacketBufferOptions{
 			Payload: buffer.MakeWithData(b),
 		})
-		w.dispatcher.DeliverNetworkPacket(networkProtocol, packetBuffer)
+		// rapido: wireguard-go's per-peer receiver routines race device
+		// Close() - a packet decrypted in flight can reach Write after the
+		// stack is torn down and the dispatcher detached. Drop it instead
+		// of nil-dereferencing (upstream never sees this because a real
+		// tun device outlives the stack).
+		if w.dispatcher != nil {
+			w.dispatcher.DeliverNetworkPacket(networkProtocol, packetBuffer)
+		}
 		packetBuffer.DecRef()
 		count++
 	}
@@ -341,6 +348,10 @@ func (w *stackDevice) Close() error {
 	w.closeOnce.Do(func() {
 		close(w.done)
 		close(w.events)
+		// rapido: detach before tearing the stack down; late decrypted
+		// packets then take the nil-guard in Write instead of racing a
+		// dying dispatcher.
+		(*wireEndpoint)(w).Detach()
 		if w.icmpForwarder != nil {
 			w.icmpForwarder.Close()
 		}
@@ -378,6 +389,13 @@ func (ep *wireEndpoint) Capabilities() stack.LinkEndpointCapabilities {
 
 func (ep *wireEndpoint) Attach(dispatcher stack.NetworkDispatcher) {
 	ep.dispatcher = dispatcher
+}
+
+// rapido: Close() nulls the dispatcher so a late Write from a wireguard-go
+// receiver routine drops the packet instead of using a dead dispatcher (see
+// stackDevice.Write).
+func (ep *wireEndpoint) Detach() {
+	ep.dispatcher = nil
 }
 
 func (ep *wireEndpoint) IsAttached() bool { return ep.dispatcher != nil }
